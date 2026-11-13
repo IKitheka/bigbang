@@ -1,0 +1,12 @@
+build/
+output/*
+!output/.gitkeep
+*.o
+*.a
+*.so
+*.log
+core
+core.*
+.vscode/
+.idea/
+.DS_Store
