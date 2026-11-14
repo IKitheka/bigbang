@@ -66,6 +66,9 @@ def measure(pixels):
 
 def main():
     root=Path(sys.argv[1])
+    start=float(sys.argv[2]) if len(sys.argv)>2 else 18.0
+    rate=float(sys.argv[3]) if len(sys.argv)>3 else 10.0
+    assert rate>0 and 0 <= start < 300
     frames=sorted(root.glob("frame_*.png"))
     assert len(frames)==41, f"Need 41 frames, got {len(frames)}"
     report=[]
@@ -76,14 +79,14 @@ def main():
         assert dims==(480,270),f"Unexpected size: {p}"
         m=measure(pixels)
         delta=None if previous is None else sum(abs(a-b) for a,b in zip(pixels,previous)) / (255*len(pixels))
-        m.update(time_seconds=round(18+i/10,3),png=p.name,sha256=sha,
+        m.update(time_seconds=round(start+i/rate,3),png=p.name,sha256=sha,
                  mean_absolute_frame_delta=None if delta is None else round(delta,6))
         report.append(m)
         previous=pixels
     moving=sum(row["mean_absolute_frame_delta"]>0 for row in report[1:])
     assert moving>0,"All native motion frames are identical"
     result={"renderer":"C++/OpenGL native pixels, Python analysis only",
-            "fps_motion_review":10,"times_seconds":[18.0,22.0],
+            "fps_motion_review":rate,"times_seconds":[start,start+40/rate],
             "resolution":[480,270],"frames":41,
             "source":"GitHub workflow provenance in output/native/provenance.txt",
             "visual_approval":False,"sampled_frames":report,
@@ -101,7 +104,7 @@ def main():
     table{{border-collapse:collapse}}td,th{{border-bottom:1px solid #445;padding:5px 12px}}
     a{{color:#9dd}}img{{max-width:100%}}</style></head><body>
     <h1>Native C++ inflation motion diagnostic</h1>
-    <p>41 frames from 18–22 seconds at 10 fps; 480×270. Not a full-rate motion test.</p>
+    <p>41 frames from {start:g}–{start+40/rate:g} seconds at {rate:g} fps; 480×270. Not a full-rate motion test.</p>
     <p><strong>CI passed is not artistic approval.</strong> Review the actual MP4 and image.</p>
     <img src="contact_motion.png" alt="Nine sampled C++ frames">
     <table><tr><th>Time</th><th>Mean luma</th><th>Near black</th><th>P95</th><th>Frame delta</th></tr>{rows}</table></body></html>"""
