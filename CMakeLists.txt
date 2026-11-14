@@ -34,6 +34,7 @@ add_executable(bigbang
     src/Shader.cpp
     src/HDRFramebuffer.cpp
     src/BloomEffect.cpp
+    src/PngWriter.cpp
 )
 
 target_include_directories(bigbang PRIVATE include)
@@ -54,3 +55,16 @@ target_compile_options(bigbang PRIVATE
     -Wextra
     -Wpedantic
 )
+
+# M0: deterministic timeline and PNG tests have no OpenGL or Blender dependency.
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(m0_native_tests
+        tests/test_native_m0.cpp
+        src/PngWriter.cpp
+    )
+    target_include_directories(m0_native_tests PRIVATE include)
+    # Keep test assertions active even when main program uses Release -DNDEBUG.
+    target_compile_options(m0_native_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
+    add_test(NAME m0_native_clock_png COMMAND m0_native_tests)
+endif()

@@ -1,0 +1,86 @@
+name: Native C++ preview
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'CMakeLists.txt'
+      - 'tests/**'
+      - '.github/workflows/native-cpp-preview.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-cpp-preview-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-m0:
+    # Never execute untrusted fork PR code with access to a persistent runner.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install C++ and software OpenGL preview dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential cmake git libglfw3-dev libglm-dev libgl1-mesa-dev \
+            libgl1-mesa-dri xvfb xauth mesa-utils
+
+      - name: Configure, build, and test native C++
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+          ./build/bigbang --help
+
+      - name: Render and validate bounded native PNGs
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: |
+          set -euo pipefail
+          mkdir -p output/native
+          {
+            echo "source_commit=${GITHUB_SHA}"
+            echo "renderer=C++17 OpenGL 3.3 native glReadPixels, NOT Blender"
+            echo "resolution=480x270"
+            echo "fps=30"
+            echo "time_seconds=0,25"
+            echo "OpenGL context: temporary Mesa software GLX via Xvfb"
+            echo "Preview only; no full sequence or GPU render"
+          } > output/native/provenance.txt
+          xvfb-run -a -s '-screen 0 1280x720x24' \
+            ./build/bigbang --frame 1 --fps 30 --width 480 --height 270 \
+            --output output/native/frame_000001.png 2>&1 | tee output/native/render_000001.log
+          xvfb-run -a -s '-screen 0 1280x720x24' \
+            ./build/bigbang --time 25 --fps 30 --width 480 --height 270 \
+            --output output/native/time_25.png 2>&1 | tee output/native/render_time25.log
+          xvfb-run -a -s '-screen 0 1280x720x24' \
+            ./build/bigbang --frame 751 --fps 30 --width 480 --height 270 \
+            --output output/native/frame_000751.png 2>&1 | tee output/native/render_000751.log
+          cmp output/native/time_25.png output/native/frame_000751.png
+          python3 tests/inspect_native_png.py \
+            output/native/frame_000001.png \
+            output/native/time_25.png \
+            output/native/frame_000751.png --width 480 --height 270 \
+            2>&1 | tee output/native/validation.log
+          sha256sum output/native/*.png | tee output/native/sha256.txt
+
+      - name: Upload native render evidence and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-m0-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            output/native/**
+          if-no-files-found: warn
+          retention-days: 7
