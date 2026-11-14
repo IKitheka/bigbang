@@ -51,13 +51,20 @@ float coherentStructure(vec3 p,float t) {
     float scale = 1.0 + 0.019*max(0.0,t-8.0);
     vec3 q = p/scale;
     float warp = fbm(q*0.125);
-    float wave1 = sin(dot(q,vec3(0.49,0.23,0.38)) + 2.4*(warp-0.5));
-    float wave2 = sin(dot(q,vec3(-0.25,0.44,0.17)) - 1.7*(warp-0.5));
-    // Squared narrow ridges provide thin, corrugated, 3D wave sheets.
-    float ribbons = exp(-46.0*wave1*wave1)
-                  + 0.58*exp(-58.0*wave2*wave2);
-    float envelope = smoothstep(0.38,0.74,fbm(q*0.18+vec3(8.2,1.1,4.8)));
-    return min(1.0,ribbons*envelope);
+    // A non-directional 3D scalar field avoids the regular, straight bands
+    // visible in the first M1 native diagnostic. Isosurfaces are driven by
+    // correlated density fluctuations rather than linear plane waves.
+    vec3 curved = q + vec3(
+         3.4*sin(0.17*q.y+2.7*warp),
+         3.1*sin(0.14*q.z-2.2*warp),
+         3.8*sin(0.13*q.x+3.0*warp));
+    float n1 = fbm(curved*0.20+vec3(3.1,-0.4,1.7));
+    float n2 = fbm(curved*0.35+vec3(-2.7,4.1,6.8));
+    float wisps = exp(-155.0*(n1-0.54)*(n1-0.54))
+                + 0.36*exp(-190.0*(n2-0.56)*(n2-0.56));
+    float envelope = smoothstep(0.43,0.69,
+        fbm(q*0.16+vec3(8.2,1.1,4.8)));
+    return min(1.0,wisps*envelope);
 }
 
 void main() {
@@ -91,7 +98,7 @@ void main() {
         // a uniform blue/grey cloud or overexposed filled frame.
         float detail = fbm(p*0.105+vec3(4.1,0.2,2.2));
         float fractal = smoothstep(0.33,0.80,detail);
-        float density = visibility * coherence * fractal * 0.052;
+        float density = visibility * pow(coherence,1.4) * fractal * 0.043;
         float alpha = 1.0-exp(-density*STEP_LENGTH);
         vec3 palette = mix(cold,silver,clamp(0.16+0.65*coherence+0.12*detail,0.0,1.0));
         float glow = mix(1.0,1.15,expansion);
