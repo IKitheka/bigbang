@@ -64,6 +64,7 @@ if(BUILD_TESTING)
         src/PngWriter.cpp
     )
     target_include_directories(m0_native_tests PRIVATE include)
-    target_compile_options(m0_native_tests PRIVATE -Wall -Wextra -Wpedantic)
+    # Keep test assertions active even when main program uses Release -DNDEBUG.
+    target_compile_options(m0_native_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
     add_test(NAME m0_native_clock_png COMMAND m0_native_tests)
 endif()
