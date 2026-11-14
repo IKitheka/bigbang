@@ -52,7 +52,8 @@ float activity(float t) {
 float coherentStructure(vec3 p, float t) {
     // A common scale changes continuously during inflation: changing spatial
     // correlation length is a cinematic metaphor, not an actual metric solver.
-    float scale = 1.0 + 0.075 * max(0.0, t-8.0);
+    // Do not increase this rate blindly: 0.075 made the 45s frame flat black.
+    float scale = 1.0 + 0.035 * max(0.0, t-8.0);
     vec3 q = p / scale;
     float drift = fbm(q*0.10+vec3(0.4,1.7,2.2));
     vec3 warped = q + vec3(
