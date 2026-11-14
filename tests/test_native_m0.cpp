@@ -1,4 +1,5 @@
 #include "FilmClock.hpp"
+#include "CinematicStory.hpp"
 #include "PrimordialCamera.hpp"
 #include "RenderOptions.hpp"
 #include "PngWriter.hpp"
@@ -36,6 +37,35 @@ std::uint32_t bigEndian(const std::vector<std::uint8_t>& bytes, std::size_t at) 
 }
 
 int main() {
+    // The narrative comes from the source video's full story, compressed into
+    // the previously agreed eight-scene 300-second cinematic main cut.
+    static_assert(cinematic::isWellFormed(), "No gaps/overlaps in story");
+    assert(cinematic::kChapters.size() == 8);
+    assert(cinematic::kFilmDurationSeconds == film::kDurationSeconds);
+    const auto& origin = cinematic::chapterAt(0.0);
+    const auto& inflation = cinematic::chapterAt(20.0);
+    const auto& qgp = cinematic::chapterAt(50.0);
+    const auto& nuclei = cinematic::chapterAt(90.0);
+    const auto& opaque = cinematic::chapterAt(130.0);
+    const auto& cmb = cinematic::chapterAt(170.0);
+    const auto& dark = cinematic::chapterAt(200.0);
+    const auto& galaxies = cinematic::chapterAt(240.0);
+    assert(origin.epoch == cinematic::Epoch::AbstractOrigin);
+    assert(inflation.epoch == cinematic::Epoch::Inflation);
+    assert(qgp.epoch == cinematic::Epoch::QuarkGluonPlasma);
+    assert(nuclei.epoch == cinematic::Epoch::PrimordialNucleosynthesis);
+    assert(opaque.epoch == cinematic::Epoch::OpaquePlasma);
+    assert(cmb.epoch == cinematic::Epoch::RecombinationCmb);
+    assert(dark.epoch == cinematic::Epoch::DarkAges);
+    assert(galaxies.epoch == cinematic::Epoch::CosmicDawnGalaxies);
+    assert(cinematic::chapterAt(299.99).epoch ==
+           cinematic::Epoch::CosmicDawnGalaxies);
+    assert(cinematic::chapterAt(49.999).epoch ==
+           cinematic::Epoch::Inflation);
+    bool rejectedEnd = false;
+    try { (void)cinematic::chapterAt(300.0); }
+    catch (const std::out_of_range&) { rejectedEnd = true; }
+    assert(rejectedEnd);
     // Blender reference camera anchor values; intermediate curves are
     // smoothly approximated and intentionally not claimed exact Bezier parity.
     const auto cam0 = primordial::cameraAt(0.0f);
