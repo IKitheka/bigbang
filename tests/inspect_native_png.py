@@ -8,7 +8,7 @@ from pathlib import Path
 
 SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
-def inspect(path: Path, width: int, height: int):
+def inspect(path: Path, width: int, height: int, allow_flat: bool = False):
     payload = path.read_bytes()
     assert payload.startswith(SIGNATURE), f"not a PNG: {path}"
     offset = 8
@@ -42,7 +42,8 @@ def inspect(path: Path, width: int, height: int):
     pixels = bytearray()
     for y in range(height):
         pixels.extend(raw[y * stride + 1:(y + 1) * stride])
-    assert max(pixels) > min(pixels), f"all pixels appear flat: {path}"
+    if not allow_flat:
+        assert max(pixels) > min(pixels), f"all pixels appear flat: {path}"
     sha = hashlib.sha256(payload).hexdigest()
     print(f"PASS {path}: {width}x{height}, RGB8, full PNG CRC/zlib, pixel range "
           f"{min(pixels)}..{max(pixels)}, sha256={sha}")
@@ -53,6 +54,7 @@ if __name__ == "__main__":
     cli.add_argument("images", nargs="+", type=Path)
     cli.add_argument("--width", type=int, default=480)
     cli.add_argument("--height", type=int, default=270)
+    cli.add_argument("--allow-flat", action="store_true", help="Accept intentionally dark frames")
     args = cli.parse_args()
     for image in args.images:
-        inspect(image, args.width, args.height)
+        inspect(image, args.width, args.height, allow_flat=args.allow_flat)
