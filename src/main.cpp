@@ -21,6 +21,7 @@
 constexpr int WINDOW_WIDTH = 1280;
 constexpr int WINDOW_HEIGHT = 720;
 constexpr int PARTICLE_COUNT = 20000;
+constexpr int SHOCKWAVE_COUNT = 2400;
 
 struct Particle {
     glm::vec3 position;
@@ -42,7 +43,7 @@ void framebufferSizeCallback(GLFWwindow* window, int width, int height) {
 
 std::vector<Particle> createParticles() {
     std::vector<Particle> particles;
-    particles.reserve(PARTICLE_COUNT + 1);
+    particles.reserve(PARTICLE_COUNT + SHOCKWAVE_COUNT + 3);
 
     std::mt19937 generator(42);
 
@@ -89,15 +90,57 @@ std::vector<Particle> createParticles() {
         particles.push_back(particle);
     }
 
-    // Add a large, stationary central energy core.
-    Particle core;
+    // Create three overlapping layers for the central energy core.
+    auto addCoreLayer = [&particles](glm::vec3 color, float size) {
+        Particle core;
+        core.position = glm::vec3(0.0f);
+        core.velocity = glm::vec3(0.0f);
+        core.color = color;
+        core.size = size;
+        particles.push_back(core);
+    };
 
-    core.position = glm::vec3(0.0f);
-    core.velocity = glm::vec3(0.0f);
-    core.color = glm::vec3(1.0f, 0.72f, 0.35f);
-    core.size = 3.2f;
+    // Large orange outer glow.
+    addCoreLayer(glm::vec3(1.0f, 0.20f, 0.025f), 4.5f);
 
-    particles.push_back(core);
+    // Hot golden middle layer.
+    addCoreLayer(glm::vec3(1.0f, 0.65f, 0.20f), 2.6f);
+
+    // Brilliant white-hot centre.
+    addCoreLayer(glm::vec3(1.0f, 0.95f, 0.80f), 1.15f);
+
+
+    // Create an expanding circular shockwave.
+    std::uniform_real_distribution<float> ringJitter(-0.025f, 0.025f);
+    std::uniform_real_distribution<float> ringSize(0.13f, 0.20f);
+
+    for (int i = 0; i < SHOCKWAVE_COUNT; ++i) {
+        float angle = randomUnit(generator) * glm::two_pi<float>();
+
+        glm::vec3 direction(
+            cos(angle),
+            sin(angle),
+            ringJitter(generator)
+        );
+
+        direction = glm::normalize(direction);
+
+        Particle wave;
+        wave.position = direction * 0.22f;
+        wave.velocity = direction * 0.48f;
+
+        float colorChoice = randomUnit(generator);
+
+        if (colorChoice < 0.65f) {
+            wave.color = glm::vec3(1.0f, 0.82f, 0.48f);
+        } else {
+            wave.color = glm::vec3(1.0f, 0.96f, 0.82f);
+        }
+
+        wave.size = ringSize(generator);
+
+        particles.push_back(wave);
+    }
 
     return particles;
 }
