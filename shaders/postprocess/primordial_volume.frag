@@ -45,26 +45,27 @@ float activity(float t) {
     return smoothstep(4.5, 12.0, t) * (1.0-smoothstep(45.0,54.0,t));
 }
 
-// World-anchored, gently expanding length scales: no radial explosive shell,
-// camera-facing noise plane, or visible sphere boundary.
-float coherentStructure(vec3 p,float t) {
-    float scale = 1.0 + 0.019*max(0.0,t-8.0);
-    vec3 q = p/scale;
-    float warp = fbm(q*0.125);
-    // A non-directional 3D scalar field avoids the regular, straight bands
-    // visible in the first M1 native diagnostic. Isosurfaces are driven by
-    // correlated density fluctuations rather than linear plane waves.
-    vec3 curved = q + vec3(
-         3.4*sin(0.17*q.y+2.7*warp),
-         3.1*sin(0.14*q.z-2.2*warp),
-         3.8*sin(0.13*q.x+3.0*warp));
-    float n1 = fbm(curved*0.20+vec3(3.1,-0.4,1.7));
-    float n2 = fbm(curved*0.35+vec3(-2.7,4.1,6.8));
-    float wisps = exp(-155.0*(n1-0.54)*(n1-0.54))
-                + 0.36*exp(-190.0*(n2-0.56)*(n2-0.56));
-    float envelope = smoothstep(0.43,0.69,
-        fbm(q*0.16+vec3(8.2,1.1,4.8)));
-    return min(1.0,wisps*envelope);
+// These are bounded, low-contrast primordial density correlations, not
+// mature cosmic-web filaments. We create a sparse set of corrugated luminous
+// folds: two independent 3D scalar fields must overlap before emission.
+// The entire field is in world space, with no visible spherical boundary.
+float coherentStructure(vec3 p, float t) {
+    // A common scale changes continuously during inflation: changing spatial
+    // correlation length is a cinematic metaphor, not an actual metric solver.
+    float scale = 1.0 + 0.035 * max(0.0, t-8.0);
+    vec3 q = p / scale;
+    float drift = fbm(q*0.10+vec3(0.4,1.7,2.2));
+    vec3 warped = q + vec3(
+        2.6*(fbm(q*0.075+vec3(3.8,1.1,0.4))-0.5),
+        2.6*(fbm(q*0.075+vec3(0.9,4.8,1.3))-0.5),
+        2.6*(fbm(q*0.075+vec3(1.4,0.6,5.7))-0.5)
+    );
+    float large = fbm(warped*0.14+vec3(4.3,1.2,0.7));
+    float fine = fbm(warped*0.37+vec3(-2.1,1.4,6.5));
+    float sheet = exp(-390.0*(large-0.595)*(large-0.595));
+    float fractured = smoothstep(0.48,0.68,fine);
+    float gate = smoothstep(0.51,0.65,drift);
+    return sheet * fractured * gate;
 }
 
 void main() {
@@ -79,32 +80,36 @@ void main() {
         return;
     }
 
-    // Bounded 64-step ray marching in camera space, fixed budget at every
-    // resolution. The field has no finite geometric boundary or black sphere.
+    // Restrict effective ray depth to prevent a screen-wide accumulation of
+    // grey opacity. Sparse emissive folds create spatial separation while
+    // preserving large areas of true negative space.
     const int STEPS = 64;
-    const float STEP_LENGTH = 0.63;
+    const float STEP_LENGTH = 0.56;
     float transmit = 1.0;
     vec3 radiance = vec3(0.0);
-    float expansion = smoothstep(10.0,33.0,uTime);
-    vec3 cold = vec3(0.12,0.21,0.34);
-    vec3 silver = vec3(0.65,0.72,0.82);
+    float growth = smoothstep(16.0,40.0,uTime);
 
     for (int i=0; i<STEPS; ++i) {
-        vec3 p = uCameraPos + ray*(0.55+(float(i)+0.5)*STEP_LENGTH);
-        float coherence = coherentStructure(p,uTime);
-        if (coherence<0.015) continue;
+        float distanceAlongRay = 0.65 + (float(i)+0.5)*STEP_LENGTH;
+        float depthWindow = smoothstep(1.0,5.0,distanceAlongRay) *
+            (1.0-smoothstep(23.0,35.0,distanceAlongRay));
+        if (depthWindow < 0.005) continue;
+        vec3 p = uCameraPos + ray*distanceAlongRay;
+        float structure = coherentStructure(p,uTime);
+        if (structure < 0.008) continue;
 
-        // Sparse modulation keeps deep black negative space, rather than
-        // a uniform blue/grey cloud or overexposed filled frame.
-        float detail = fbm(p*0.105+vec3(4.1,0.2,2.2));
-        float fractal = smoothstep(0.33,0.80,detail);
-        float density = visibility * pow(coherence,1.4) * fractal * 0.043;
-        float alpha = 1.0-exp(-density*STEP_LENGTH);
-        vec3 palette = mix(cold,silver,clamp(0.16+0.65*coherence+0.12*detail,0.0,1.0));
-        float glow = mix(1.0,1.15,expansion);
-        radiance += transmit*alpha*palette*glow;
+        float alpha = 1.0-exp(-0.14 * visibility *
+            pow(structure,1.25) * depthWindow * STEP_LENGTH);
+        float core = smoothstep(0.25,0.88,structure);
+        vec3 low = vec3(0.08,0.13,0.21);
+        vec3 high = vec3(0.64,0.77,0.88);
+        vec3 tint = mix(low,high,core);
+        // The bright extrema carry the visible structure while the body of
+        // each fold remains subdued. Exposure still happens downstream.
+        float intensity = mix(0.54,1.25,core) * mix(1.0,1.14,growth);
+        radiance += transmit * alpha * tint * intensity;
         transmit *= 1.0-alpha;
-        if (transmit < 0.018) break;
+        if (transmit < 0.015) break;
     }
     // Scene-linear radiance only. Existing native HDR FBO + conservative
     // post-process handles display mapping. No white point light or flash.
