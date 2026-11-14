@@ -1,0 +1,117 @@
+name: Native M1.2 motion evidence
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'shaders/**'
+      - 'tests/render_native_motion.sh'
+      - 'tests/native_visual_report.py'
+      - '.github/workflows/native-m1-motion.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-m1-motion-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  temporal-review:
+    # Only trusted same-repo PR code; never run code from forks with secrets.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      GALLIUM_DRIVER: 'llvmpipe'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install software OpenGL and video tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential cmake git libglfw3-dev libglm-dev libgl1-mesa-dev \
+            libgl1-mesa-dri xvfb xauth mesa-utils ffmpeg
+      - name: Build native C++ and run unit tests
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+          bash -n tests/render_native_motion.sh
+          python3 -m py_compile tests/native_visual_report.py
+
+      - name: Render actual C++ motion 18–22s (41 low-cost frames)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output/native
+          {
+            echo "commit=${GITHUB_SHA}"
+            echo "render_engine=native C++17/OpenGL 3.3/GLSL, software Mesa llvmpipe"
+            echo "scene=illustrative primordial fluctuation field"
+            echo "motion_review=18.0-22.0s, 41 samples at 10fps"
+            echo "frame_size=480x270, preview ONLY"
+            echo "no Blender/Python rendering involved"
+          } > output/native/provenance.txt
+          timeout --signal=TERM --kill-after=15s 18m \
+            xvfb-run -a -s '-screen 0 1280x720x24' \
+            bash tests/render_native_motion.sh \
+            2>&1 | tee output/native/motion_render.log
+
+      - name: Produce contact sheet, diagnostic video and measurements
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output/native/contact
+          for j in $(seq 0 8); do
+            i=$((j * 5))
+            printf -v source 'output/native/motion/frame_%04d.png' "$i"
+            printf -v target 'output/native/contact/frame_%02d.png' "$j"
+            cp "$source" "$target"
+          done
+          ffmpeg -hide_banner -loglevel error -y -framerate 1 \
+            -i 'output/native/contact/frame_%02d.png' \
+            -vf 'tile=3x3:margin=8:padding=6:color=black' -frames:v 1 \
+            output/native/contact_motion.png
+          ffmpeg -hide_banner -loglevel error -y -framerate 10 \
+            -i 'output/native/motion/frame_%04d.png' \
+            -c:v libx264 -preset fast -crf 18 -pix_fmt yuv420p \
+            -movflags +faststart output/native/m1_transition_18_22s.mp4
+          python3 tests/native_visual_report.py output/native/motion \
+            2>&1 | tee output/native/visual_validation.log
+          sha256sum output/native/motion/frame_*.png > output/native/motion_sha256.txt
+          ffprobe -v error -select_streams v:0 \
+            -show_entries stream=codec_name,width,height,avg_frame_rate,nb_frames \
+            -of default=noprint_wrappers=1 \
+            output/native/m1_transition_18_22s.mp4 \
+            > output/native/video_metadata.txt
+      - name: Upload native evidence even on render failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-m1-motion-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            output/native/motion/frame_*.png
+            output/native/contact_motion.png
+            output/native/m1_transition_18_22s.mp4
+            output/native/motion_metrics.json
+            output/native/visual_review.html
+            output/native/provenance.txt
+            output/native/motion_render.log
+            output/native/visual_validation.log
+            output/native/motion_sha256.txt
+            output/native/video_metadata.txt
+      - name: Note that visual approval is manual
+        if: always()
+        run: |
+          echo '### M1.2 preview gate' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Evidence includes genuine C++-rendered frames and a 10fps diagnostic clip. Static checks and image metrics do NOT imply cinematic approval.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Do not merge into main or launch production until the owner approves native visuals.' >> "$GITHUB_STEP_SUMMARY"
