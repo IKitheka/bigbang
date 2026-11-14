@@ -6,6 +6,7 @@ on:
       - 'src/**'
       - 'include/**'
       - 'CMakeLists.txt'
+      - 'shaders/**'
       - 'tests/**'
       - '.github/workflows/native-cpp-preview.yml'
   workflow_dispatch:
@@ -52,6 +53,8 @@ jobs:
           {
             echo "source_commit=${GITHUB_SHA}"
             echo "renderer=C++17 OpenGL 3.3 native glReadPixels, NOT Blender"
+            echo "preview_scene=M1 native 0..50 second world-space raymarch"
+            echo "blender_reference=primordial-universe-animation, visual/issue-2-coherent-opening-inflation; this reference failed artistic review; no claimed look parity"
             echo "resolution=480x270"
             echo "fps=30"
             echo "time_seconds=0,25"
@@ -69,10 +72,24 @@ jobs:
             --output output/native/frame_000751.png 2>&1 | tee output/native/render_000751.log
           cmp output/native/time_25.png output/native/frame_000751.png
           python3 tests/inspect_native_png.py \
-            output/native/frame_000001.png \
+            output/native/frame_000001.png --width 480 --height 270 --allow-flat \
+            2>&1 | tee output/native/validation.log
+          python3 tests/inspect_native_png.py \
             output/native/time_25.png \
             output/native/frame_000751.png --width 480 --height 270 \
-            2>&1 | tee output/native/validation.log
+            2>&1 | tee -a output/native/validation.log
+
+          # Native M1 reference timestamps. All frames are rendered by C++;
+          # Python below only verifies the generated PNG files.
+          for t in 10 18 20 30 45 50; do
+            timeout 135s xvfb-run -a -s '-screen 0 1280x720x24' \
+              ./build/bigbang --time "$t" --fps 30 --width 480 --height 270 \
+              --output "output/native/m1_t${t}.png" \
+              2>&1 | tee "output/native/m1_t${t}.log"
+          done
+          python3 tests/inspect_native_png.py \
+            output/native/m1_t*.png --width 480 --height 270 \
+            2>&1 | tee -a output/native/validation.log
           sha256sum output/native/*.png | tee output/native/sha256.txt
 
       - name: Upload native render evidence and logs

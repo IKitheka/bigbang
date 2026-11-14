@@ -1,4 +1,5 @@
 #include "FilmClock.hpp"
+#include "PrimordialCamera.hpp"
 #include "RenderOptions.hpp"
 #include "PngWriter.hpp"
 
@@ -35,6 +36,21 @@ std::uint32_t bigEndian(const std::vector<std::uint8_t>& bytes, std::size_t at) 
 }
 
 int main() {
+    // Blender reference camera anchor values; intermediate curves are
+    // smoothly approximated and intentionally not claimed exact Bezier parity.
+    const auto cam0 = primordial::cameraAt(0.0f);
+    const auto cam20 = primordial::cameraAt(20.0f);
+    const auto cam50 = primordial::cameraAt(50.0f);
+    assert(glm::length(cam0.position-glm::vec3(0,-18,3)) < 0.00001f);
+    assert(cam0.focalLengthMm == 68.0f);
+    assert(glm::length(cam20.position-glm::vec3(0,-12,2)) < 0.00001f);
+    assert(cam20.focalLengthMm == 52.0f);
+    assert(glm::length(cam50.position-glm::vec3(-2,1,3.2f)) < 0.00001f);
+    assert(cam50.focalLengthMm == 62.0f);
+    assert(primordial::verticalTanHalfFov(cam20, 16.0f/9.0f)>0.1f);
+    const auto camMid = primordial::cameraAt(22.0f);
+    assert(camMid.position.y > -12.0f && camMid.position.y < -10.2f);
+
     assert(film::secondsForFrame(1, 30) == 0.0);
     assert(film::secondsForFrame(751, 30) == 25.0);
     assert(film::secondsForFrame(1501, 60) == 25.0);

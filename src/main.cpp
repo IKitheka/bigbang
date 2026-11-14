@@ -8,6 +8,7 @@
 #include "BloomEffect.hpp"
 #include "RenderOptions.hpp"
 #include "PngWriter.hpp"
+#include "PrimordialCamera.hpp"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -241,6 +242,15 @@ int main(int argc, char** argv) {
                     "/shaders/postprocess/composite.frag"
             );
 
+            // M1: independent native fragment-raymarch of the 0–50 s
+            // primordial field. No Blender renderer/assets are invoked.
+            Shader primordialShader(
+                std::string(PROJECT_ROOT) +
+                    "/shaders/postprocess/screen.vert",
+                std::string(PROJECT_ROOT) +
+                    "/shaders/postprocess/primordial_volume.frag"
+            );
+
             int initialWidth = 0;
             int initialHeight = 0;
             glfwGetFramebufferSize(
@@ -366,7 +376,7 @@ int main(int argc, char** argv) {
             }
 
             std::cout << "Particle system initialized.\n";
-            std::cout << "Central energy core created.\n";
+            std::cout << "M1 native primordial volume active at t=0..50s.\n";
             std::cout << "Press ESC to exit.\n\n";
 
             while (!glfwWindowShouldClose(window)) {
@@ -424,26 +434,52 @@ int main(int argc, char** argv) {
                 glClearColor(0.002f, 0.001f, 0.008f, 1.0f);
                 glClear(GL_COLOR_BUFFER_BIT);
 
-                shader.use();
-
-                glUniformMatrix4fv(
-                    viewLocation, 1, GL_FALSE, glm::value_ptr(view)
-                );
-
-                glUniformMatrix4fv(
-                    projectionLocation, 1, GL_FALSE,
-                    glm::value_ptr(projection)
-                );
-
-                glBindVertexArray(VAO);
-
-                glDrawArrays(
-                    GL_POINTS,
-                    0,
-                    static_cast<GLsizei>(vertices.size())
-                );
-
-                glBindVertexArray(0);
+                if (elapsed <= 50.0f) {
+                    // Fullscreen world-space volume raymarch: camera pose and
+                    // focal lengths sampled from Blender's reference keys.
+                    // The cinematic shader is an independent C++/GLSL
+                    // implementation, not a converted Cycles node graph.
+                    glDisable(GL_BLEND);
+                    const auto pose = primordial::cameraAt(elapsed);
+                    const glm::vec3 forward =
+                        glm::normalize(-pose.position);
+                    const glm::vec3 right = glm::normalize(glm::cross(
+                        forward, glm::vec3(0.0f,0.0f,1.0f)));
+                    const glm::vec3 up = glm::normalize(glm::cross(
+                        right, forward));
+                    primordialShader.use();
+                    const GLuint program = primordialShader.getID();
+                    const float aspect = float(width)/float(height);
+                    glUniform1f(glGetUniformLocation(program,"uTime"),elapsed);
+                    glUniform3fv(glGetUniformLocation(program,"uCameraPos"),
+                                 1,glm::value_ptr(pose.position));
+                    glUniform3fv(glGetUniformLocation(program,"uCameraForward"),
+                                 1,glm::value_ptr(forward));
+                    glUniform3fv(glGetUniformLocation(program,"uCameraRight"),
+                                 1,glm::value_ptr(right));
+                    glUniform3fv(glGetUniformLocation(program,"uCameraUp"),
+                                 1,glm::value_ptr(up));
+                    glUniform1f(glGetUniformLocation(program,"uAspect"),aspect);
+                    glUniform1f(
+                        glGetUniformLocation(program,"uTanHalfFovY"),
+                        primordial::verticalTanHalfFov(pose,aspect));
+                    glBindVertexArray(quadVAO);
+                    glDrawArrays(GL_TRIANGLE_STRIP,0,4);
+                    glBindVertexArray(0);
+                } else {
+                    // Other scene windows still use the M0 particle prototype.
+                    // These are placeholders pending M2/M3 native ports.
+                    shader.use();
+                    glUniformMatrix4fv(
+                        viewLocation,1,GL_FALSE,glm::value_ptr(view));
+                    glUniformMatrix4fv(
+                        projectionLocation,1,GL_FALSE,
+                        glm::value_ptr(projection));
+                    glBindVertexArray(VAO);
+                    glDrawArrays(GL_POINTS,0,
+                        static_cast<GLsizei>(vertices.size()));
+                    glBindVertexArray(0);
+                }
 
                 // Stop rendering to the HDR framebuffer.
                 HDRFramebuffer::unbind();
