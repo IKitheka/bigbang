@@ -6,6 +6,8 @@
 #include "Shader.hpp"
 #include "HDRFramebuffer.hpp"
 #include "BloomEffect.hpp"
+#include "RenderOptions.hpp"
+#include "PngWriter.hpp"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -19,6 +21,7 @@
 #include <cmath>
 #include <exception>
 #include <string>
+#include <cstdint>
 
 constexpr int WINDOW_WIDTH = 1280;
 constexpr int WINDOW_HEIGHT = 720;
@@ -147,7 +150,27 @@ std::vector<Particle> createParticles() {
     return particles;
 }
 
-int main() {
+int main(int argc, char** argv) {
+    film::RenderOptions options;
+    try {
+        options = film::parseOptions(argc, argv);
+    } catch (const std::exception& error) {
+        std::cerr << "Invalid render options: " << error.what() << '\n';
+        std::cerr << "Run --help for supported options.\n";
+        return 2;
+    }
+    if (options.showHelp) {
+        std::cout
+            << "BigBang native C++ OpenGL preview (M0 particle prototype)\n"
+            << "Interactive: ./bigbang [--width W --height H]\n"
+            << "Native frame: ./bigbang --time 25 --fps 30 "
+               "--width 480 --height 270 --output output/native/25.png\n"
+            << "Or: ./bigbang --frame 751 --fps 30 --output output/native/frame751.png\n"
+            << "--frame is 1-indexed, time=(frame-1)/fps, film duration 300 s.\n"
+            << "Capture is native glReadPixels from the C++ OpenGL pipeline.\n"
+            << "The current M0 image is not yet a Blender-quality scene.\n";
+        return 0;
+    }
     if (!glfwInit()) {
         std::cerr << "ERROR: GLFW initialization failed.\n";
         return -1;
@@ -156,10 +179,16 @@ int main() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    if (options.capture) {
+        // A hidden OpenGL window provides a one-frame offscreen capture
+        // without showing or playing any Blender-rendered media.
+        glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    }
 
     GLFWwindow* window = glfwCreateWindow(
-        WINDOW_WIDTH,
-        WINDOW_HEIGHT,
+        options.width,
+        options.height,
         "Big Bang Simulation | Particle Expansion",
         nullptr,
         nullptr
@@ -181,7 +210,7 @@ int main() {
     }
 
     glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
-    glfwSwapInterval(1);
+    glfwSwapInterval(options.capture ? 0 : 1);
 
     glEnable(GL_PROGRAM_POINT_SIZE);
     glEnable(GL_BLEND);
@@ -328,7 +357,13 @@ int main() {
                 glm::vec3(0.0f, 1.0f, 0.0f)
             );
 
-            double startTime = glfwGetTime();
+            const double startTime = glfwGetTime();
+            if (options.capture) {
+                std::cout << "Capture requested: t=" << options.timeSeconds
+                          << " s, nominal frame " << options.frame << "/"
+                          << (options.fps * film::kDurationSeconds)
+                          << " @ " << options.fps << " fps\n";
+            }
 
             std::cout << "Particle system initialized.\n";
             std::cout << "Central energy core created.\n";
@@ -339,8 +374,10 @@ int main() {
                     glfwSetWindowShouldClose(window, true);
                 }
 
-                float elapsed = static_cast<float>(
-                    glfwGetTime() - startTime
+                // Time is a pure input to evaluation. Interactive mode uses
+                // wall time; capture mode uses the explicit frame/time seek.
+                const float elapsed = static_cast<float>(
+                    options.capture ? options.timeSeconds : glfwGetTime() - startTime
                 );
 
                 for (size_t i = 0; i < particles.size(); ++i) {
@@ -475,6 +512,26 @@ int main() {
 
                 glEnable(GL_BLEND);
 
+                if (options.capture) {
+                    // Read the actual C++/GLSL-composited default back buffer.
+                    // glReadPixels is bottom-up; PngWriter flips it to PNG rows.
+                    std::vector<std::uint8_t> pixels(
+                        static_cast<std::size_t>(width) *
+                        static_cast<std::size_t>(height) * 3u
+                    );
+                    glFinish();
+                    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+                    glReadBuffer(GL_BACK);
+                    glReadPixels(0, 0, width, height, GL_RGB,
+                                 GL_UNSIGNED_BYTE, pixels.data());
+                    if (glGetError() != GL_NO_ERROR) {
+                        throw std::runtime_error("OpenGL readback failed");
+                    }
+                    png::writeRgbBottomUp(options.output, width, height, pixels);
+                    std::cout << "Native C++ PNG: " << options.output
+                              << " (" << width << "x" << height << ")\n";
+                    break;
+                }
                 glfwSwapBuffers(window);
                 glfwPollEvents();
             }
