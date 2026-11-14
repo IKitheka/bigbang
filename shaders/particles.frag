@@ -1,26 +1,46 @@
 #version 330 core
 
 in vec3 particleColor;
+in float particleSize;
 
 out vec4 FragColor;
 
 void main() {
-    vec2 centered = gl_PointCoord - vec2(0.5);
+    vec2 centered = gl_PointCoord * 2.0 - vec2(1.0);
+    float radius = length(centered);
 
-    float distanceFromCenter = length(centered);
-
-    if (distanceFromCenter > 0.5) {
+    if (radius > 1.0) {
         discard;
     }
 
-    float glow = exp(-distanceFromCenter * distanceFromCenter * 24.0);
+    bool isEnergyCore = particleSize > 1.0;
 
-    float core = 1.0 - smoothstep(0.0, 0.16, distanceFromCenter);
-
-    float brightness = glow + core * 0.8;
-
-    FragColor = vec4(
-        particleColor * brightness,
-        brightness * 0.75
+    float softGlow = exp(
+        -radius * radius * (isEnergyCore ? 4.0 : 9.0)
     );
+
+    float hotCenter = exp(
+        -radius * radius * (isEnergyCore ? 18.0 : 22.0)
+    );
+
+    float emission;
+
+    if (isEnergyCore) {
+        emission = 5.0 * hotCenter + 1.5 * softGlow;
+    } else {
+        emission = 1.3 * hotCenter + 0.45 * softGlow;
+    }
+
+    float alpha;
+
+    if (isEnergyCore) {
+        alpha = 1.0 - smoothstep(0.45, 1.0, radius);
+    } else {
+        alpha = 1.0 - smoothstep(0.25, 1.0, radius);
+    }
+
+    // Values above 1.0 are preserved by the HDR framebuffer.
+    vec3 hdrColor = particleColor * emission;
+
+    FragColor = vec4(hdrColor, alpha);
 }
