@@ -98,8 +98,12 @@ void main() {
         float structure = coherentStructure(p,uTime);
         if (structure < 0.008) continue;
 
-        float alpha = 1.0-exp(-0.14 * visibility *
-            pow(structure,1.25) * depthWindow * STEP_LENGTH);
+        // Bias light into the existing spatial folds rather than globally
+        // lifting the dark background. The late camera path crosses denser
+        // structures, so a smoothly attenuated gain prevents a 45s hotspot.
+        float cameraGain = 1.0-0.82*smoothstep(34.0,43.0,uTime);
+        float alpha = 1.0-exp(-0.30 * cameraGain * visibility *
+            pow(structure,0.82) * depthWindow * STEP_LENGTH);
         float core = smoothstep(0.25,0.88,structure);
         vec3 low = vec3(0.08,0.13,0.21);
         vec3 high = vec3(0.64,0.77,0.88);
