@@ -4,6 +4,8 @@
 #include <GLFW/glfw3.h>
 
 #include "Shader.hpp"
+#include "HDRFramebuffer.hpp"
+#include "BloomEffect.hpp"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -203,6 +205,30 @@ int main() {
                 std::string(PROJECT_ROOT) + "/shaders/particles.frag"
             );
 
+            Shader compositeShader(
+                std::string(PROJECT_ROOT) +
+                    "/shaders/postprocess/screen.vert",
+                std::string(PROJECT_ROOT) +
+                    "/shaders/postprocess/composite.frag"
+            );
+
+            int initialWidth = 0;
+            int initialHeight = 0;
+            glfwGetFramebufferSize(
+                window, &initialWidth, &initialHeight
+            );
+
+            HDRFramebuffer hdr(
+                initialWidth > 0 ? initialWidth : 1,
+                initialHeight > 0 ? initialHeight : 1
+            );
+
+            BloomEffect bloom(
+                std::string(PROJECT_ROOT) + "/shaders/postprocess",
+                initialWidth > 0 ? initialWidth : 1,
+                initialHeight > 0 ? initialHeight : 1
+            );
+
             std::vector<Particle> particles = createParticles();
 
             std::vector<ParticleVertex> vertices(particles.size());
@@ -243,6 +269,47 @@ int main() {
                 (void*)offsetof(ParticleVertex, size)
             );
             glEnableVertexAttribArray(2);
+
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
+            glBindVertexArray(0);
+
+
+            // Fullscreen quad: position (x,y) and texture (u,v).
+            const float quadVertices[] = {
+                -1.0f, -1.0f, 0.0f, 0.0f,
+                 1.0f, -1.0f, 1.0f, 0.0f,
+                -1.0f,  1.0f, 0.0f, 1.0f,
+                 1.0f,  1.0f, 1.0f, 1.0f
+            };
+
+            GLuint quadVAO = 0;
+            GLuint quadVBO = 0;
+
+            glGenVertexArrays(1, &quadVAO);
+            glGenBuffers(1, &quadVBO);
+
+            glBindVertexArray(quadVAO);
+            glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
+
+            glBufferData(
+                GL_ARRAY_BUFFER,
+                sizeof(quadVertices),
+                quadVertices,
+                GL_STATIC_DRAW
+            );
+
+            glEnableVertexAttribArray(0);
+            glVertexAttribPointer(
+                0, 2, GL_FLOAT, GL_FALSE,
+                4 * sizeof(float), (void*)0
+            );
+
+            glEnableVertexAttribArray(1);
+            glVertexAttribPointer(
+                1, 2, GL_FLOAT, GL_FALSE,
+                4 * sizeof(float),
+                (void*)(2 * sizeof(float))
+            );
 
             glBindBuffer(GL_ARRAY_BUFFER, 0);
             glBindVertexArray(0);
@@ -304,6 +371,10 @@ int main() {
                     continue;
                 }
 
+                hdr.resize(width, height);
+                bloom.resize(width, height);
+                hdr.bind();
+
                 glViewport(0, 0, width, height);
 
                 glm::mat4 projection = glm::perspective(
@@ -337,9 +408,79 @@ int main() {
 
                 glBindVertexArray(0);
 
+                // Stop rendering to the HDR framebuffer.
+                HDRFramebuffer::unbind();
+
+                GLuint bloomTexture = bloom.render(
+                    hdr.getColorTexture(),
+                    quadVAO
+                );
+
+                glViewport(0, 0, width, height);
+
+                // Present the HDR texture on screen.
+                glDisable(GL_BLEND);
+
+                glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+                glClear(GL_COLOR_BUFFER_BIT);
+
+                compositeShader.use();
+
+                glActiveTexture(GL_TEXTURE0);
+                glBindTexture(
+                    GL_TEXTURE_2D,
+                    hdr.getColorTexture()
+                );
+
+                // Blurred HDR highlights.
+                glActiveTexture(GL_TEXTURE1);
+                glBindTexture(
+                    GL_TEXTURE_2D,
+                    bloomTexture
+                );
+
+                glUniform1i(
+                    glGetUniformLocation(
+                        compositeShader.getID(), "uScene"
+                    ), 0
+                );
+
+                glUniform1i(
+                    glGetUniformLocation(
+                        compositeShader.getID(), "uBloomBlur"
+                    ), 1
+                );
+
+                glUniform1f(
+                    glGetUniformLocation(
+                        compositeShader.getID(), "uBloomStrength"
+                    ), 1.2f
+                );
+
+                glUniform1f(
+                    glGetUniformLocation(
+                        compositeShader.getID(), "uExposure"
+                    ), 1.0f
+                );
+
+                glBindVertexArray(quadVAO);
+                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+                glBindVertexArray(0);
+
+                glActiveTexture(GL_TEXTURE1);
+                glBindTexture(GL_TEXTURE_2D, 0);
+
+                glActiveTexture(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_2D, 0);
+
+                glEnable(GL_BLEND);
+
                 glfwSwapBuffers(window);
                 glfwPollEvents();
             }
+
+            glDeleteBuffers(1, &quadVBO);
+            glDeleteVertexArrays(1, &quadVAO);
 
             glDeleteBuffers(1, &VBO);
             glDeleteVertexArrays(1, &VAO);

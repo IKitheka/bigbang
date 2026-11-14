@@ -32,6 +32,8 @@ glad_add_library(glad_gl_core_33
 add_executable(bigbang
     src/main.cpp
     src/Shader.cpp
+    src/HDRFramebuffer.cpp
+    src/BloomEffect.cpp
 )
 
 target_include_directories(bigbang PRIVATE include)
