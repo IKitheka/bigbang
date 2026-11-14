@@ -376,7 +376,7 @@ int main(int argc, char** argv) {
             }
 
             std::cout << "Particle system initialized.\n";
-            std::cout << "M1 native primordial volume active at t=0..50s.\n";
+            std::cout << "M1.3 native primordial/QGP preview volume active at t=0..90s.\n";
             std::cout << "Press ESC to exit.\n\n";
 
             while (!glfwWindowShouldClose(window)) {
@@ -434,7 +434,7 @@ int main(int argc, char** argv) {
                 glClearColor(0.002f, 0.001f, 0.008f, 1.0f);
                 glClear(GL_COLOR_BUFFER_BIT);
 
-                if (elapsed <= 50.0f) {
+                if (elapsed <= 90.0f) {
                     // Fullscreen world-space volume raymarch: camera pose and
                     // focal lengths sampled from Blender's reference keys.
                     // The cinematic shader is an independent C++/GLSL
@@ -467,7 +467,7 @@ int main(int argc, char** argv) {
                     glDrawArrays(GL_TRIANGLE_STRIP,0,4);
                     glBindVertexArray(0);
                 } else {
-                    // Other scene windows still use the M0 particle prototype.
+                    // Scenes after 90 seconds still use the M0 particle prototype.
                     // These are placeholders pending M2/M3 native ports.
                     shader.use();
                     glUniformMatrix4fv(
