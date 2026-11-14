@@ -1,0 +1,131 @@
+name: Native M1.3 50s transition
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'shaders/**'
+      - 'tests/render_native_boundary.sh'
+      - 'tests/native_visual_report.py'
+      - '.github/workflows/native-m1-50s-transition.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-50s-transition-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  handoff-preview:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      GALLIUM_DRIVER: 'llvmpipe'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up bounded native renderer
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential cmake git libglfw3-dev libglm-dev libgl1-mesa-dev \
+            libgl1-mesa-dri xvfb xauth mesa-utils ffmpeg
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+          bash -n tests/render_native_boundary.sh
+
+      - name: Render native 47–55s transition
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output/native
+          {
+            echo "commit=${GITHUB_SHA}"
+            echo "renderer=C++17/OpenGL 3.3 GLSL Mesa llvmpipe (not Blender)"
+            echo "motion=47–55 seconds, 41 C++ frames at 5fps"
+            echo "480x270; provisional QGP transition illustration, NOT final physics"
+            echo "earlier accepted 18–22s look should remain unchanged"
+          } > output/native/provenance_50s.txt
+          timeout --signal=TERM --kill-after=15s 15m \
+            xvfb-run -a -s '-screen 0 1280x720x24' \
+            bash tests/render_native_boundary.sh \
+            2>&1 | tee output/native/boundary_render.log
+          # Also inspect provisional QGP medium away from the boundary.
+          for t in 65 85; do
+            timeout 45s xvfb-run -a -s '-screen 0 1280x720x24' \
+              ./build/bigbang --time "$t" --fps 30 --width 480 --height 270 \
+              --output "output/native/qgp_t${t}.png" \
+              2>&1 | tee "output/native/qgp_t${t}.log"
+          done
+
+      - name: Encode and audit transition
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/native_visual_report.py output/native/boundary 47 5 \
+            | tee output/native/boundary_validation.log
+          python3 tests/inspect_native_png.py output/native/qgp_t*.png \
+            --width 480 --height 270 \
+            | tee -a output/native/boundary_validation.log
+          python3 - <<'PY'
+          import json
+          r=json.load(open("output/native/motion_metrics.json"))
+          near=[x for x in r["sampled_frames"] if 49.8 <= x["time_seconds"] <= 50.2]
+          assert len(near)>=3, "Missing 50s boundary samples"
+          assert max(x["near_white_fraction"] for x in near)<0.25, "Overexposed boundary"
+          assert max(x["mean_absolute_frame_delta"] or 0 for x in near)<0.12, "Sudden temporal pop at 50s"
+          print("PASS: 50s samples have no large raw-pixel discontinuity; manual review still required")
+          PY
+          mkdir -p output/native/contact
+          for j in $(seq 0 8); do
+            i=$((j*5))
+            printf -v src 'output/native/boundary/frame_%04d.png' "$i"
+            printf -v dst 'output/native/contact/frame_%02d.png' "$j"
+            cp "$src" "$dst"
+          done
+          ffmpeg -hide_banner -loglevel error -y -framerate 1 \
+            -i 'output/native/contact/frame_%02d.png' \
+            -vf 'tile=3x3:margin=8:padding=6:color=black' -frames:v 1 \
+            output/native/contact_50s.png
+          ffmpeg -hide_banner -loglevel error -y -framerate 5 \
+            -i 'output/native/boundary/frame_%04d.png' -c:v libx264 \
+            -preset fast -crf 18 -pix_fmt yuv420p -movflags +faststart \
+            output/native/transition_47_55s.mp4
+          sha256sum output/native/boundary/frame_*.png > output/native/boundary_sha256.txt
+          ffprobe -v error -select_streams v:0 \
+            -show_entries stream=codec_name,width,height,avg_frame_rate,nb_frames \
+            -of default=noprint_wrappers=1 \
+            output/native/transition_47_55s.mp4 > output/native/video_metadata.txt
+
+      - name: Archive preview evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-m1-3-50s-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            output/native/boundary/frame_*.png
+            output/native/contact_50s.png
+            output/native/transition_47_55s.mp4
+            output/native/qgp_t*.png
+            output/native/boundary_sha256.txt
+            output/native/motion_metrics.json
+            output/native/visual_review.html
+            output/native/boundary_render.log
+            output/native/boundary_validation.log
+            output/native/provenance_50s.txt
+            output/native/video_metadata.txt
+      - name: Require separate visual review
+        if: always()
+        run: |
+          echo '### Native M1.3 preview-only review' >> "$GITHUB_STEP_SUMMARY"
+          echo 'The C++/GLSL 47–55s clip is a low-rate provisional transition. CI success does not grant cinematic or scientific approval.' >> "$GITHUB_STEP_SUMMARY"

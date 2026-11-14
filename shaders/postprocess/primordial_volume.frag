@@ -76,7 +76,10 @@ void main() {
         (xy.y*uTanHalfFovY)*uCameraUp);
 
     float visibility = activity(uTime);
-    if (visibility <= 0.0001) {
+    // A single C++ shader spans both epochs: no hard material/renderer swap
+    // at t=50. The QGP-like continuum is only a first illustrative bridge.
+    float plasmaWeight = smoothstep(48.0, 62.0, uTime);
+    if (visibility <= 0.0001 && plasmaWeight <= 0.0001) {
         FragColor = vec4(0.0,0.0,0.0,1.0);
         return;
     }
@@ -97,23 +100,44 @@ void main() {
         if (depthWindow < 0.005) continue;
         vec3 p = uCameraPos + ray*distanceAlongRay;
         float structure = coherentStructure(p,uTime);
-        if (structure < 0.008) continue;
+
+        // Gradually broaden density correlations into a radiation-coupled
+        // continuum after inflation, without introducing star-like points.
+        // Shared field coordinates prevent an abrupt change at 50 seconds.
+        vec3 plasmaP = p/(1.0+0.035*max(0.0,uTime-8.0));
+        float plasmaNoise = fbm(plasmaP*0.24+vec3(3.1,0.7,1.9));
+        float plasmaDetail = fbm(plasmaP*0.46+vec3(1.3,5.7,-2.1));
+        float plasmaField = smoothstep(0.43,0.72,plasmaNoise) *
+            mix(0.55,1.0,plasmaDetail);
+        if (structure < 0.008 && plasmaWeight*plasmaField < 0.008) continue;
 
         // Bias light into the existing spatial folds rather than globally
         // lifting the dark background. The late camera path crosses denser
         // structures, so a smoothly attenuated gain prevents a 45s hotspot.
         float cameraGain = 1.0-0.82*smoothstep(34.0,43.0,uTime);
-        float alpha = 1.0-exp(-0.30 * cameraGain * visibility *
+        float earlyAlpha = 1.0-exp(-0.30 * cameraGain * visibility *
             pow(structure,0.82) * depthWindow * STEP_LENGTH);
         float core = smoothstep(0.25,0.88,structure);
         vec3 low = vec3(0.08,0.13,0.21);
         vec3 high = vec3(0.64,0.77,0.88);
         vec3 tint = mix(low,high,core);
-        // The bright extrema carry the visible structure while the body of
-        // each fold remains subdued. Exposure still happens downstream.
         float intensity = mix(0.54,1.25,core) * mix(1.0,1.14,growth);
-        radiance += transmit * alpha * tint * intensity;
-        transmit *= 1.0-alpha;
+
+        // Warm/cool neutral radiation cues rather than a literal
+        // temperature color, orange explosion, or starfield. Low optical
+        // depth permits local contrast and spatial continuity.
+        float qgpAlpha = 1.0-exp(-0.035*plasmaWeight*plasmaField *
+            depthWindow*STEP_LENGTH);
+        vec3 qgpTint = mix(vec3(0.22,0.27,0.34),vec3(0.57,0.45,0.40),
+                           clamp(plasmaDetail,0.0,1.0));
+        vec3 qgpColor = qgpTint * (0.65+0.32*plasmaDetail);
+        vec3 earlyColor = tint * intensity;
+        float combined = 1.0-(1.0-earlyAlpha)*(1.0-qgpAlpha);
+        if (combined > 0.000001) {
+            radiance += transmit *
+                (earlyAlpha*earlyColor+qgpAlpha*qgpColor);
+            transmit *= (1.0-combined);
+        }
         if (transmit < 0.015) break;
     }
     // Scene-linear radiance only. Existing native HDR FBO + conservative

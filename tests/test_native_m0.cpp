@@ -50,6 +50,15 @@ int main() {
     assert(primordial::verticalTanHalfFov(cam20, 16.0f/9.0f)>0.1f);
     const auto camMid = primordial::cameraAt(22.0f);
     assert(camMid.position.y > -12.0f && camMid.position.y < -10.2f);
+    const auto cam70 = primordial::cameraAt(70.0f);
+    const auto cam90 = primordial::cameraAt(90.0f);
+    assert(glm::length(cam70.position-glm::vec3(2,-8,2)) < 0.00001f);
+    assert(cam70.focalLengthMm == 65.0f);
+    assert(glm::length(cam90.position-glm::vec3(0,-7,2.5f)) < 0.00001f);
+    assert(cam90.focalLengthMm == 70.0f);
+    const auto camAtBoundary = primordial::cameraAt(50.0f);
+    const auto camAfterBoundary = primordial::cameraAt(50.01f);
+    assert(glm::length(camAtBoundary.position-camAfterBoundary.position) < 0.001f);
 
     assert(film::secondsForFrame(1, 30) == 0.0);
     assert(film::secondsForFrame(751, 30) == 25.0);
