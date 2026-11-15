@@ -111,8 +111,8 @@ inline RenderOptions parseOptions(int argc, const char* const argv[]) {
             opts.rawVideo != "-" || endArgument < startArgument) {
             throw std::invalid_argument("Batch requires --start-frame N --end-frame N --raw-video - without single-frame options.");
         }
-        if (opts.width > 1920 || opts.height > 1080) {
-            throw std::invalid_argument("Batch review is limited to 1920x1080; no 4K production.");
+        if (opts.width > 3840 || opts.height > 2160) {
+            throw std::invalid_argument("Batch capture is limited to native UHD 3840x2160.");
         }
         opts.timeSeconds = secondsForFrame(startArgument, opts.fps);
         (void)secondsForFrame(endArgument, opts.fps);
