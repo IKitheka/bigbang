@@ -114,8 +114,8 @@ vec3 lateGalaxy(vec3 origin, vec3 ray, float t, int index,
                     vec2 jitter=vec2(hash31(seed),hash31(seed+vec3(6.3,1.4,7.7)));
                     vec2 offset=cell+jitter-gridPos;
                     float d2=dot(offset,offset);
-                    float active=step(0.55,hash31(seed+vec3(2.3,4.1,0.5)));
-                    float light=exp(-25.0*d2)*active;
+                    float starVisible=step(0.55,hash31(seed+vec3(2.3,4.1,0.5)));
+                    float light=exp(-25.0*d2)*starVisible;
                     float young=step(0.72,hash31(seed+vec3(3.9,8.2,1.2)));
                     vec3 color=mix(vec3(0.83,0.73,0.60),vec3(0.62,0.76,0.93),
                                    young);
