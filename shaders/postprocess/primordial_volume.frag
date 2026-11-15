@@ -79,7 +79,14 @@ void main() {
     // A single C++ shader spans both epochs: no hard material/renderer swap
     // at t=50. The QGP-like continuum is only a first illustrative bridge.
     float plasmaWeight = smoothstep(48.0, 62.0, uTime);
-    if (visibility <= 0.0001 && plasmaWeight <= 0.0001) {
+    // V7: luminous correlated fluctuations continuously emerge from the
+    // preceding bright ignition, then dissipate before the 50s QGP handoff.
+    // The contribution is EXACTLY zero for all times >=50s.
+    float expansionWeight =
+        smoothstep(17.5, 24.0, uTime) *
+        (1.0 - smoothstep(42.0, 50.0, uTime));
+    if (visibility <= 0.0001 && plasmaWeight <= 0.0001
+        && expansionWeight <= 0.0001) {
         FragColor = vec4(0.0,0.0,0.0,1.0);
         return;
     }
@@ -109,7 +116,11 @@ void main() {
         float plasmaDetail = fbm(plasmaP*0.46+vec3(1.3,5.7,-2.1));
         float plasmaField = smoothstep(0.43,0.72,plasmaNoise) *
             mix(0.55,1.0,plasmaDetail);
-        if (structure < 0.008 && plasmaWeight*plasmaField < 0.008) continue;
+        // Do not skip low-density regions until the independent V7 field
+        // has been evaluated. This is additional emissive structure, not a
+        // replacement for the V4 universe or an artificially bright sky.
+        if (structure < 0.008 && plasmaWeight*plasmaField < 0.008
+            && expansionWeight <= 0.001) continue;
 
         // Bias light into the existing spatial folds rather than globally
         // lifting the dark background. The late camera path crosses denser
@@ -132,10 +143,44 @@ void main() {
                            clamp(plasmaDetail,0.0,1.0));
         vec3 qgpColor = qgpTint * (0.65+0.32*plasmaDetail);
         vec3 earlyColor = tint * intensity;
-        float combined = 1.0-(1.0-earlyAlpha)*(1.0-qgpAlpha);
+        // V7: an evolving three-dimensional field of broad correlated
+        // radiation folds, curved luminous membranes and cavities. Slowly
+        // stretching the shared coordinates sells expansion WITHOUT stars,
+        // jets, gridlines or literal explosive debris. Sample every other
+        // depth slice to keep bounded native rendering costs.
+        float expansionAlpha = 0.0;
+        vec3 expansionColor = vec3(0.0);
+        if (expansionWeight > 0.001 && (i % 2 == 0)) {
+            float age = max(0.0, uTime - 18.0);
+            float scale = 1.0 + age * 0.028;
+            vec3 stretched = p / scale +
+                vec3(0.014, -0.009, 0.011) * age;
+            float broad = fbm(stretched*0.13+vec3(4.2,8.1,-1.8));
+            float fold  = fbm(stretched*0.31+vec3(8.7,1.3,5.0));
+            float fine  = valueNoise(stretched*1.07+vec3(3.1,-2.0,4.6));
+            float foldInterface = exp(-165.0*(fold-0.56)*(fold-0.56));
+            float filaments = exp(-340.0*(fold-0.64)*(fold-0.64));
+            float air = smoothstep(0.40,0.69,broad) *
+                        (0.24+0.76*smoothstep(0.32,0.72,fine));
+            float density = 0.07*air +
+                            (0.62+0.42*fine)*foldInterface +
+                            0.27*filaments;
+            float altitude = smoothstep(1.0,5.0,distanceAlongRay) *
+                (1.0-smoothstep(23.0,34.0,distanceAlongRay));
+            expansionAlpha = 1.0-exp(-0.050*expansionWeight*density *
+                altitude*STEP_LENGTH*2.0);
+            float luminous = smoothstep(0.34,0.88,density);
+            vec3 deepBlue = vec3(0.06,0.10,0.27);
+            vec3 violetSilver = vec3(0.98,0.79,1.16);
+            vec3 tintV7 = mix(deepBlue,violetSilver,luminous);
+            expansionColor = tintV7*(0.46+0.90*luminous);
+        }
+        float combined = 1.0 -
+            (1.0-earlyAlpha)*(1.0-qgpAlpha)*(1.0-expansionAlpha);
         if (combined > 0.000001) {
             radiance += transmit *
-                (earlyAlpha*earlyColor+qgpAlpha*qgpColor);
+                (earlyAlpha*earlyColor + qgpAlpha*qgpColor +
+                 expansionAlpha*expansionColor);
             transmit *= (1.0-combined);
         }
         if (transmit < 0.015) break;
