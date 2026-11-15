@@ -91,7 +91,7 @@ jobs:
               --first-frame ${{ matrix.first }} --end-frame ${{ matrix.last }} \
               --width 1920 --height 1080 --fps 30 \
               --chunk-frames 150 --chunk-timeout 1450 \
-              --preset veryfast --crf 18
+              --preset fast --crf 18
           cp output/v11_native_${{ matrix.id }}/film.mp4 output/v11_source/part_${{ matrix.id }}.mp4
           cp output/v11_native_${{ matrix.id }}/manifest.json output/v11_source/manifest_${{ matrix.id }}.json
           cp output/v11_native_${{ matrix.id }}/checkpoint.json output/v11_source/checkpoint_${{ matrix.id }}.json
