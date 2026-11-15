@@ -1,0 +1,150 @@
+name: V8 galaxy dawn native 40s cinematic evidence
+
+on:
+  pull_request:
+    paths:
+      - 'shaders/postprocess/cosmic_late.glsl'
+      - 'shaders/galaxies/catalog.vert'
+      - '.github/workflows/v8-galaxy-dawn-native.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v8-galaxy-dawn-native
+  cancel-in-progress: true
+
+jobs:
+  native-dawn:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 32
+    env:
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      GALLIUM_DRIVER: llvmpipe
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install native 3D software renderer and encoding
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential cmake git libglfw3-dev libglm-dev \
+            libgl1-mesa-dev libgl1-mesa-dri xvfb xauth ffmpeg \
+            python3-numpy
+      - name: Compile C++ and check existing tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+          git diff --exit-code origin/feature/v7-visible-cosmic-expansion -- \
+            shaders/postprocess/primordial_volume.frag \
+            shaders/postprocess/nasa_origin.frag \
+            shaders/postprocess/solar_system.frag \
+            include/CinematicTimeline.hpp
+      - name: Capture native 190-230s 30fps shot in one GL context
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output/v8_native
+          # Frame numbers are 1-indexed: t=(frame-1)/30.
+          # 5701..6900 = EXACTLY 1200 contiguous native OpenGL frames.
+          # IMPORTANT: the raw RGB24 pipe must be INSIDE xvfb-run.
+          # Otherwise wrapper diagnostics can be forwarded to ffmpeg's stdin,
+          # rotating RGB channels and creating visible vertical tears.
+          timeout --signal=TERM --kill-after=15s 23m \
+            xvfb-run -a -s '-screen 0 1024x768x24' bash -c '
+              set -euo pipefail
+              ./build/bigbang --start-frame 5701 --end-frame 6900 \
+                --fps 30 --width 480 --height 270 --raw-video - \
+                2>output/v8_native/native_render.log |
+              ffmpeg -hide_banner -loglevel error -nostdin -y \
+                -f rawvideo -pixel_format rgb24 -video_size 480x270 \
+                -framerate 30 -i pipe:0 \
+                -c:v libx264 -preset veryfast -crf 19 -pix_fmt yuv420p \
+                -movflags +faststart output/v8_native/native_video_silent.mp4
+            '
+      - name: Verify RGB24 video matches independent C++ stills
+        shell: bash
+        run: |
+          set -euo pipefail
+          O=output/v8_native
+          for t in 205 215 225; do
+            xvfb-run -a -s '-screen 0 1024x768x24' \
+              ./build/bigbang --time "$t" --fps 30 \
+              --width 480 --height 270 --output "$O/native_t$t.png" \
+              > "$O/still_t$t.log" 2>&1
+          done
+          python3 - <<'PY'
+          import numpy as np,subprocess
+          O='output/v8_native'
+          def rgb(command):
+              data=subprocess.check_output(command)
+              assert len(data)==480*270*3,len(data)
+              return np.frombuffer(data,dtype=np.uint8).astype(np.int16)
+          for t in (205,215,225):
+              actual=rgb(['ffmpeg','-v','error','-ss',str(t-190),
+                  '-i',f'{O}/native_video_silent.mp4','-frames:v','1',
+                  '-pix_fmt','rgb24','-f','rawvideo','pipe:1'])
+              reference=rgb(['ffmpeg','-v','error','-i',f'{O}/native_t{t}.png',
+                  '-frames:v','1','-pix_fmt','rgb24','-f','rawvideo','pipe:1'])
+              mae=float(np.mean(np.abs(actual-reference)))
+              print(f'Native C++ still versus RGB24 video at t={t}s: MAE={mae:.3f}')
+              assert mae<8.0,f'Corrupt/interleaved RGB24 video at t={t}: MAE={mae}'
+          print('PASS: movie colors agree with individually rendered C++ reference')
+          PY
+      - name: Synthesize original audio and validate native shot
+        shell: bash
+        run: |
+          set -euo pipefail
+          O=output/v8_native
+          python3 scripts/create_original_score.py --output "$O/original_score.wav" --seconds 230
+          ffmpeg -hide_banner -loglevel error -y \
+            -i "$O/native_video_silent.mp4" \
+            -ss 190 -t 40 -i "$O/original_score.wav" \
+            -map 0:v:0 -map 1:a:0 -c:v copy -c:a aac -b:a 160k \
+            -movflags +faststart \
+            "$O/BigBang_V8_Native_Galaxy_Transition_40s_With_Sound.mp4"
+          python3 - <<'PY'
+          import json,subprocess,pathlib
+          p=pathlib.Path('output/v8_native/BigBang_V8_Native_Galaxy_Transition_40s_With_Sound.mp4')
+          data=json.loads(subprocess.check_output(['ffprobe','-v','error','-count_frames',
+              '-show_entries','format=duration:stream=codec_name,width,height,avg_frame_rate,nb_read_frames,channels',
+              '-of','json',str(p)]))
+          v=next(s for s in data['streams'] if s['codec_name']=='h264')
+          a=next(s for s in data['streams'] if s['codec_name']=='aac')
+          assert (v['width'],v['height'],v['avg_frame_rate'],int(v['nb_read_frames']))==(480,270,'30/1',1200),v
+          assert 39.98<float(data['format']['duration'])<40.08,data
+          assert a['channels']==2
+          pathlib.Path('output/v8_native/validation.json').write_text(json.dumps(data,indent=2))
+          print('PASS native C++ H264 1200 frames, 40s, AAC stereo')
+          PY
+          ffmpeg -hide_banner -loglevel error -xerror \
+            -i "$O/BigBang_V8_Native_Galaxy_Transition_40s_With_Sound.mp4" \
+            -f null -
+          # Frames in this grid come directly from the native video.
+          for offset in 0 6 10 15 20 25 30 35 39; do
+            ffmpeg -hide_banner -loglevel error -y -ss "$offset" \
+              -i "$O/BigBang_V8_Native_Galaxy_Transition_40s_With_Sound.mp4" \
+              -frames:v 1 "$O/frame_$offset.png"
+          done
+          printf 'Native C++/GLSL renderer; no Blender/movie frames used.\n' \
+            > "$O/provenance.txt"
+      - name: Upload genuine native clip, stills and validation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v8-native-galaxy-transition-evidence
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            output/v8_native/*.mp4
+            output/v8_native/*.png
+            output/v8_native/*.json
+            output/v8_native/*.txt
+            output/v8_native/*.log

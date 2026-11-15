@@ -16,7 +16,10 @@ out float vSeed;
 void main() {
     vec3 delta=aPosition-uCameraPos;
     float z=dot(delta,uCameraForward);
-    vVisible=smoothstep(240.0,273.0,uTime);
+    // V8: reveal galaxy cores across the dust-clearing transition instead
+    // of waiting for the grey veil to disappear.  Visibility is 1.0
+    // by t=273 as before, leaving all later galaxy shots unchanged.
+    vVisible=smoothstep(238.0,273.0,uTime);
     if(z<0.5 || vVisible<0.00001) {
         gl_PointSize=1.0;
         gl_Position=vec4(3.0,3.0,1.0,1.0);
