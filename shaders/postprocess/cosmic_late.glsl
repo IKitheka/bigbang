@@ -223,8 +223,20 @@ vec3 lateEpochRadiance(vec3 origin, vec3 ray, float t) {
                          pow(max(lace,0.0),0.85)*traceWeight*depthWindow;
         radiance += transmit*darkTrace*stepLength;
         source += vec3(0.016,0.014,0.011)*concentrated*dawn;
-        radiance += transmit*alpha*source;
-        transmit *= 1.0-alpha;
+        // Carry the bright radiation-coupled medium through the 164–176s
+        // early/late GLSL handoff, then let it scatter away into genuinely
+        // transparent space by 200s. The scalar basis shares the coarse
+        // coordinates used in the preceding opaque phase, avoiding a hard
+        // replacement by another unrelated visual effect.
+        float clearing=1.0-smoothstep(172.0,198.0,t);
+        float cloudy=0.24+0.62*smoothstep(0.25,0.74,coarse)+0.14*fine;
+        float mistAlpha=1.0-exp(-clearing*depthWindow*
+                                (0.055+0.17*cloudy)*stepLength);
+        vec3 mistTint=mix(vec3(0.57,0.65,0.76),
+                          vec3(1.04,0.98,0.91),
+                          smoothstep(0.39,0.72,coarse));
+        radiance+=transmit*(alpha*source+mistAlpha*mistTint);
+        transmit*=(1.0-alpha)*(1.0-mistAlpha);
     }
     // Low-amplitude scalar perturbations on a neutral background: deliberately
     // no false-color/rainbow CMB map, spherical shell, grid or visible sky dome.
