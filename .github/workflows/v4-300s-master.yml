@@ -1,0 +1,270 @@
+name: V4 cinematic full five minutes, 1080p export and original sound
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/v4-300s-master.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v4-cinematic-final-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-segments:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'feature/v4-protoplanetary-formation-cinematic')
+    name: Native segment ${{ matrix.id }} ${{ matrix.width }}p
+    runs-on: ubuntu-24.04
+    timeout-minutes: 54
+    env:
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      GALLIUM_DRIVER: llvmpipe
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        include:
+          - {id: '01', first: 1, last: 600, width: 1280, height: 720}
+          - {id: '02', first: 601, last: 1500, width: 1280, height: 720}
+          - {id: '03', first: 1501, last: 2460, width: 1280, height: 720}
+          - {id: '04', first: 2461, last: 3480, width: 1280, height: 720}
+          - {id: '05', first: 3481, last: 4470, width: 1280, height: 720}
+          - {id: '06', first: 4471, last: 5280, width: 1280, height: 720}
+          - {id: '07', first: 5281, last: 5880, width: 1280, height: 720}
+          - {id: '08', first: 5881, last: 6600, width: 1280, height: 720}
+          - {id: '09', first: 6601, last: 7200, width: 1280, height: 720}
+          - {id: '10', first: 7201, last: 7800, width: 1280, height: 720}
+          - {id: '11', first: 7801, last: 8400, width: 1920, height: 1080}
+          - {id: '12', first: 8401, last: 9000, width: 1920, height: 1080}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Install C++ software OpenGL and media dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential cmake git libglfw3-dev libglm-dev libgl1-mesa-dev \
+            libgl1-mesa-dri xvfb xauth ffmpeg
+      - name: Build and test C++ scene compiler
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+      - name: Render independent native OpenGL frames with recoverable 150-frame chunks
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output/v4_part_${{ matrix.id }} output/submission
+          git rev-parse HEAD > output/submission/commit_${{ matrix.id }}.txt
+          timeout --signal=TERM --kill-after=20s 48m \
+            xvfb-run -a -s '-screen 0 1920x1080x24' \
+            python3 scripts/render_film.py \
+              --binary build/bigbang \
+              --output-dir output/v4_part_${{ matrix.id }} \
+              --first-frame ${{ matrix.first }} \
+              --end-frame ${{ matrix.last }} \
+              --width ${{ matrix.width }} \
+              --height ${{ matrix.height }} \
+              --fps 30 --chunk-frames 150 --chunk-timeout 1550 \
+              --preset fast --crf 18 \
+              2>&1 | tee output/submission/render_log_${{ matrix.id }}.txt
+          cp output/v4_part_${{ matrix.id }}/film.mp4 \
+             output/submission/part_${{ matrix.id }}.mp4
+          cp output/v4_part_${{ matrix.id }}/checkpoint.json \
+             output/submission/checkpoint_${{ matrix.id }}.json
+          cp output/v4_part_${{ matrix.id }}/manifest.json \
+             output/submission/manifest_${{ matrix.id }}.json
+          sha256sum output/submission/part_${{ matrix.id }}.mp4 \
+             > output/submission/sha256_${{ matrix.id }}.txt
+      - name: Upload finished segment, logs and checkpoints even on interruption
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v4-fullfilm-part-${{ matrix.id }}-${{ github.run_id }}
+          retention-days: 20
+          if-no-files-found: warn
+          path: |
+            output/submission/*
+            output/v4_part_${{ matrix.id }}/chunks/*.mp4
+            !output/v4_part_${{ matrix.id }}/chunks/*.partial.mp4
+            output/v4_part_${{ matrix.id }}/checkpoint.json
+
+  master:
+    name: Native 300s complete film, true-HD Solar System, 1080p delivery and audio
+    needs: native-segments
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install full decode and stereo score dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ffmpeg python3-numpy
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: v4-fullfilm-part-*-${{ github.run_id }}
+          path: output/incoming
+          merge-multiple: true
+      - name: Strictly verify source provenance and twelve native segments
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output/final
+          python3 - <<'PY'
+          import pathlib,json,subprocess,hashlib
+          root=pathlib.Path('output/incoming')
+          frames=[600,900,960,1020,990,810,600,720,600,600,600,600]
+          assert sum(frames)==9000, sum(frames)
+          provenance={'fps':30,'total_frames':9000,'seconds':300,
+            'first_260_seconds_native':[1280,720],
+            'last_40_seconds_native':[1920,1080],
+            'delivered_video':[1920,1080],
+            'fullhd_delivery_upsampling_disclosure':
+              'The first 260s are genuinely rendered at 1280x720, upscaled with Lanczos to 1920x1080. The last 40s are independently rendered at true 1920x1080.',
+            'segments':[]}
+          first=[];last=[]
+          expected_sha=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+          for i,frame_count in enumerate(frames,1):
+              item=root/f'part_{i:02d}.mp4'
+              if not item.exists(): raise SystemExit(f'Missing video {item}')
+              sha_file=root/f'commit_{i:02d}.txt'
+              if not sha_file.exists() or sha_file.read_text().strip()!=expected_sha:
+                  raise SystemExit(f'Source commit mismatch: {item}')
+              res=json.loads(subprocess.check_output(['ffprobe','-v','error',
+                  '-count_frames','-select_streams','v:0',
+                  '-show_entries','stream=width,height,codec_name,avg_frame_rate,nb_read_frames:format=duration',
+                  '-of','json',str(item)],text=True,timeout=300))
+              stream=res['streams'][0]
+              width,height=(1280,720) if i<=10 else (1920,1080)
+              if not (int(stream['nb_read_frames'])==frame_count and
+                      stream['width']==width and stream['height']==height and
+                      stream['avg_frame_rate']=='30/1' and
+                      stream['codec_name']=='h264'):
+                  raise SystemExit(f'Unusable V4 native frame interval {item}: {res}')
+              # All segment bytes fully decode before they can enter master.
+              subprocess.run(['ffmpeg','-v','error','-xerror','-nostdin','-i',
+                  str(item),'-f','null','-'],check=True,timeout=450)
+              provenance['segments'].append({'id':i,'frames':frame_count,
+                'native_resolution':[width,height],
+                'sha256':hashlib.sha256(item.read_bytes()).hexdigest()})
+              entry="file '"+item.resolve().as_posix()+"'\n"
+              if i<=10:first.append(entry)
+              else:last.append(entry)
+          pathlib.Path('output/final/pre_solar_concat.txt').write_text(''.join(first))
+          pathlib.Path('output/final/solar_concat.txt').write_text(''.join(last))
+          pathlib.Path('output/final/native_provenance.json').write_text(json.dumps(provenance,indent=2)+'\n')
+          print('Verified every one of 9000 independently rendered GL frames, original source identical.')
+          PY
+      - name: Join 720p science scenes, upscale for 1080p distribution and stitch genuine 1080p Solar System
+        shell: bash
+        run: |
+          set -euo pipefail
+          ffmpeg -nostdin -hide_banner -loglevel error -y \
+            -f concat -safe 0 -i output/final/pre_solar_concat.txt \
+            -c:v copy -an output/final/first260s_native_720p.mp4
+          ffmpeg -nostdin -hide_banner -loglevel error -y \
+            -i output/final/first260s_native_720p.mp4 \
+            -vf 'scale=1920:1080:flags=lanczos,unsharp=5:5:0.33' \
+            -c:v libx264 -preset veryfast -crf 19 -pix_fmt yuv420p \
+            -r 30 -an output/final/first260s_upscaled_1080p.mp4
+          ffmpeg -nostdin -hide_banner -loglevel error -y \
+            -f concat -safe 0 -i output/final/solar_concat.txt \
+            -c:v copy -an output/final/last40s_native_1080p.mp4
+          printf "file '%s'\nfile '%s'\n" \
+            "$PWD/output/final/first260s_upscaled_1080p.mp4" \
+            "$PWD/output/final/last40s_native_1080p.mp4" \
+            > output/final/all_video_parts.txt
+          ffmpeg -nostdin -hide_banner -loglevel error -y \
+            -f concat -safe 0 -i output/final/all_video_parts.txt \
+            -c:v copy -an -movflags +faststart \
+            output/final/300s_video_only.mp4
+      - name: Synthesize and add entirely original five-minute stereo cinematic score
+        shell: bash
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 scripts/create_original_score.py \
+            --seconds 300 --output output/final/original_score.wav
+          ffmpeg -nostdin -hide_banner -loglevel error -y \
+            -i output/final/300s_video_only.mp4 -i output/final/original_score.wav \
+            -map 0:v:0 -map 1:a:0 -c:v copy -c:a aac \
+            -b:a 192k -ar 48000 -ac 2 -t 300 \
+            -movflags +faststart \
+            output/final/BigBang_V4_5min_1080p_Formation_Sound.mp4
+      - name: Strictly verify 1080p output, all 9000 frames, 300s and true stereo audio
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,subprocess,hashlib,pathlib
+          p=pathlib.Path('output/final/BigBang_V4_5min_1080p_Formation_Sound.mp4')
+          raw=subprocess.check_output(['ffprobe','-v','error','-count_frames',
+             '-show_entries','stream=codec_type,codec_name,width,height,avg_frame_rate,nb_read_frames,channels:format=duration,size',
+             '-of','json',str(p)],text=True,timeout=600)
+          j=json.loads(raw)
+          v=[s for s in j['streams'] if s.get('codec_type')=='video']
+          a=[s for s in j['streams'] if s.get('codec_type')=='audio']
+          if not(len(v)==1 and len(a)==1 and v[0]['codec_name']=='h264' and
+             v[0]['width']==1920 and v[0]['height']==1080 and
+             v[0]['avg_frame_rate']=='30/1' and int(v[0]['nb_read_frames'])==9000 and
+             a[0]['codec_name']=='aac' and int(a[0]['channels'])==2 and
+             abs(float(j['format']['duration'])-300)<0.12):
+              raise SystemExit(f'Invalid V4 delivery metadata: {j}')
+          subprocess.run(['ffmpeg','-nostdin','-v','error','-xerror',
+                           '-i',str(p),'-f','null','-'],check=True,timeout=1200)
+          j['sha256']=hashlib.sha256(p.read_bytes()).hexdigest()
+          j['full_decode_verified']=True
+          j['native_720p_upscaled_first_260s']=True
+          j['true_1080p_native_last_40s']=True
+          pathlib.Path('output/final/verification.json').write_text(json.dumps(j,indent=2)+'\n')
+          print('PASS: exact 300s, 9000 H264 frames 1920x1080, original stereo AAC, full clean decode')
+          PY
+      - name: Produce lightweight playable 480x270 MP4 and full-film story contact
+        shell: bash
+        run: |
+          set -euo pipefail
+          ffmpeg -nostdin -hide_banner -loglevel error -y \
+            -i output/final/BigBang_V4_5min_1080p_Formation_Sound.mp4 \
+            -vf 'scale=480:270:flags=lanczos,fps=15' \
+            -c:v libx264 -preset veryfast -crf 29 -pix_fmt yuv420p \
+            -c:a aac -b:a 96k -movflags +faststart \
+            output/final/BigBang_V4_5min_Easy_Play_With_Sound.mp4
+          mkdir -p output/final/stills
+          i=0
+          for t in 3 7 15 22 35 55 80 105 138 163 183 199 225 255 264 272 282 297; do
+            printf -v out 'output/final/stills/frame_%02d.png' "$i"
+            ffmpeg -nostdin -hide_banner -loglevel error -y \
+              -ss "$t" -i output/final/BigBang_V4_5min_1080p_Formation_Sound.mp4 \
+              -vf 'scale=480:270' -frames:v 1 "$out"
+            i=$((i+1))
+          done
+          ffmpeg -nostdin -hide_banner -loglevel error -y -framerate 1 \
+            -i 'output/final/stills/frame_%02d.png' \
+            -vf 'tile=3x6:margin=6:padding=5:color=black' \
+            -frames:v 1 output/final/18_frame_cinematic_storyboard.png
+      - name: Upload the validated five-minute final movie and compact playback version
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bigbang-v4-300s-1080p-cinematic-sound-${{ github.run_id }}
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            output/final/BigBang_V4_5min_1080p_Formation_Sound.mp4
+            output/final/BigBang_V4_5min_Easy_Play_With_Sound.mp4
+            output/final/18_frame_cinematic_storyboard.png
+            output/final/verification.json
+            output/final/native_provenance.json
+      - name: Art direction and resolution disclosure
+        if: always()
+        run: |
+          echo 'V4 original 300s C++17/OpenGL/GLSL film: nebular collapse, dusty protoplanetary disc, planet growth, Earth closeup and originally synthesized stereo score.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'The first 260s are native 1280x720 upscaled to Full-HD export; the final 40s are true native 1920x1080. Full export has exactly 9000 frames, 300s and original AAC audio if validation succeeds.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'YouTube references by melodysheep and Bob Stanford guided shot aesthetics; no reference film pixels/music are in final.' >> "$GITHUB_STEP_SUMMARY"
