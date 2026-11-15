@@ -97,8 +97,8 @@ vec3 earlyEpochRadiance(vec3 origin, vec3 ray, float t) {
         // native 3D advected scalar field without screen-space flicker.
         float knot=smoothstep(0.49,0.72,plasmaFine)*
                    smoothstep(0.45,0.68,fine)*
-                   exp(-190.0*pow(coarse-0.55,2.0));
-        float seam=exp(-240.0*pow(fine-0.59,2.0))*
+                   exp(-190.0*(coarse-0.55)*(coarse-0.55));
+        float seam=exp(-240.0*(fine-0.59)*(fine-0.59))*
                    (0.25+0.75*plasmaCoarse);
         float ignition=nuclearWeight*(knot*2.2+seam*0.54);
         source+=ignition*vec3(2.10,1.16,0.46);
