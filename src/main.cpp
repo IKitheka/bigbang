@@ -103,6 +103,7 @@ int main(int argc,char** argv) {
         const std::string root=PROJECT_ROOT;
         Shader composite(root+"/shaders/postprocess/screen.vert",root+"/shaders/postprocess/composite.frag");
         Shader primordial(root+"/shaders/postprocess/screen.vert",root+"/shaders/postprocess/primordial_volume.frag");
+        Shader nasaOrigin(root+"/shaders/postprocess/screen.vert",root+"/shaders/postprocess/nasa_origin.frag");
         Shader evolution(root+"/shaders/postprocess/screen.vert",root+"/shaders/postprocess/cosmic_evolution.frag");
         cinematic::GalaxyCatalog deepField(root);
         int initialWidth=0,initialHeight=0;
@@ -136,6 +137,16 @@ int main(int argc,char** argv) {
             // STAGES 1/4/6/8: procedural world medium, shading, bounded depth and
             // native fragment-ray transport. No M0 orange-particle placeholders.
             if(t<=56.0f) drawVolume(primordial,primordial::cameraAt(t),t,width,height,quad);
+            if(t<18.0f) {
+                // User-selected NASA 2007 opening: magenta-white ignition,
+                // brief controlled brilliance and soft milk-grey transition.
+                // Protected native opening 18–22s remains EXACTLY unchanged.
+                glEnable(GL_BLEND);
+                glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+                drawVolume(nasaOrigin,primordial::cameraAt(t),t,width,height,quad);
+                glDisable(GL_BLEND);
+                glBlendFunc(GL_SRC_ALPHA,GL_ONE);
+            }
             if(t>45.0f) {
                 glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
                 drawVolume(evolution,cinematic::cameraAt(t),t,width,height,quad,
