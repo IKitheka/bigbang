@@ -88,6 +88,44 @@ jobs:
             && { echo 'No visible motion in native preview' >&2; exit 1; } \
             || true
           cat "$O/video_metadata.json"
+      - name: Encode two continuous C++ shots for actual motion review
+        shell: bash
+        run: |
+          set -euo pipefail
+          O=output/nasa2007_native
+          # One native C++/OpenGL context per shot. FFmpeg receives genuine
+          # RGB24 frames from C++ stdout; it NEVER generates scene images.
+          timeout --signal=TERM --kill-after=15s 7m \
+            xvfb-run -a -s '-screen 0 1280x720x24' \
+            bash -c 'set -euo pipefail
+              ./build/bigbang --start-frame 1 --end-frame 540 --fps 30 \
+                --width 480 --height 270 --raw-video - |
+              ffmpeg -hide_banner -loglevel error -nostdin -y \
+                -f rawvideo -pixel_format rgb24 -video_size 480x270 \
+                -framerate 30 -i pipe:0 -vf fps=10 \
+                -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p \
+                -movflags +faststart \
+                output/nasa2007_native/nasa_origin_0_18s.mp4' \
+            2>&1 | tee "$O/opening_batch.log"
+          timeout --signal=TERM --kill-after=15s 10m \
+            xvfb-run -a -s '-screen 0 1280x720x24' \
+            bash -c 'set -euo pipefail
+              ./build/bigbang --start-frame 7201 --end-frame 9000 --fps 30 \
+                --width 480 --height 270 --raw-video - |
+              ffmpeg -hide_banner -loglevel error -nostdin -y \
+                -f rawvideo -pixel_format rgb24 -video_size 480x270 \
+                -framerate 30 -i pipe:0 -vf fps=5 \
+                -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p \
+                -movflags +faststart \
+                output/nasa2007_native/nasa_galaxy_reveal_240_300s.mp4' \
+            2>&1 | tee "$O/galaxy_batch.log"
+          for file in "$O/nasa_origin_0_18s.mp4" "$O/nasa_galaxy_reveal_240_300s.mp4"; do
+            ffprobe -v error -count_frames -select_streams v:0 \
+              -show_entries format=duration:stream=width,height,avg_frame_rate,nb_read_frames \
+              -of json "$file"
+            ffmpeg -nostdin -hide_banner -v error -xerror -i "$file" -f null -
+          done
+          echo 'PASS: independently shaded by C++17/GLSL, encoded & decoded without errors'
       - name: Upload video, real native PNGs and proof
         if: always()
         uses: actions/upload-artifact@v4
@@ -103,6 +141,7 @@ jobs:
             output/nasa2007_native/*.mp4
             output/nasa2007_native/*.json
             output/nasa2007_native/*.txt
+            output/nasa2007_native/*.log
             nasa_render_log.txt
             output_nasa_provenance.txt
       - name: Manual cinematic approval required
