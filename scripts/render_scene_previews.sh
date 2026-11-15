@@ -17,7 +17,7 @@ scenes=(
   'opaque_plasma 148 135 145 155 165'
   'recombination 183 173 181 191 198'
   'dark_ages 217 205 215 225 235'
-  'cosmic_dawn 271 244 258 275 295'
+  'cosmic_dawn 278 244 258 275 295'
 )
 scene_id=0
 for record in "${scenes[@]}"; do
