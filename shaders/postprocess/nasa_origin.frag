@@ -89,9 +89,12 @@ void main() {
     cloudColor=mix(cloudColor,vec3(.72,.52,.88),cold*.40);
     light+=cloudColor*cloudDensity*cloudGate*1.25;
 
-    // Concentrated transient bloom; avoid frame-wide exposure pumping.
-    float flash=exp(-pow(abs((t-6.60)/.45),4.0));
-    light+=vec3(.95,.84,1.15)*exp(-2.7*r)*flash*1.7;
+    // V6/V7: perceptible violet-white climax of the ignition followed by
+    // an immediate smooth falloff into the continuous expansion field.
+    // The brighter optical effect is an original artistic metaphor.
+    float flash=exp(-pow(abs((t-5.90)/0.55),4.0));
+    light+=vec3(2.2,2.1,2.35)*exp(-2.1*r)*flash*2.3;
+    light+=vec3(1.2,1.1,1.3)*exp(-0.9*r*r)*flash*1.2;
 
     // Preserve the approved V4 native 18-22s handoff EXACTLY: after
     // t=18 there is no V5 contribution. No other film epochs are changed.
