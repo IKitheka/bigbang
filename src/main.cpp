@@ -22,8 +22,13 @@ void framebufferSizeCallback(GLFWwindow*,int w,int h) { glViewport(0,0,w,h); }
 // STAGES 2/3/5: world-space ray camera, view basis and perspective projection.
 // The original pre-45s math and shader bytes are deliberately preserved.
 void drawVolume(Shader& shader,const primordial::CameraPose& pose,float t,
-                int width,int height,GLuint quad) {
-    const glm::vec3 forward=glm::normalize(-pose.position);
+                int width,int height,GLuint quad,
+                glm::vec3 lookAt=glm::vec3(0.0f)) {
+    // Do not alter pre-dawn camera evaluation, especially the protected
+    // 18–22s opening. After 240s the native camera can track a hero galaxy.
+    const glm::vec3 forward = t<=240.0f
+        ? glm::normalize(-pose.position)
+        : glm::normalize(lookAt-pose.position);
     const glm::vec3 right=glm::normalize(glm::cross(forward,glm::vec3(0,0,1)));
     const glm::vec3 up=glm::normalize(glm::cross(right,forward));
     shader.use();
@@ -131,7 +136,8 @@ int main(int argc,char** argv) {
             if(t<=56.0f) drawVolume(primordial,primordial::cameraAt(t),t,width,height,quad);
             if(t>45.0f) {
                 glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
-                drawVolume(evolution,cinematic::cameraAt(t),t,width,height,quad);
+                drawVolume(evolution,cinematic::cameraAt(t),t,width,height,quad,
+                           cinematic::targetAt(t));
                 glDisable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA,GL_ONE);
             }
             HDRFramebuffer::unbind();

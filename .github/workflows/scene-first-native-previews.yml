@@ -1,0 +1,100 @@
+name: Scene-first native cinematic previews
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'shaders/**'
+      - 'scripts/render_scene_previews.sh'
+      - 'tests/scene_preview_audit.py'
+      - '.github/workflows/scene-first-native-previews.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scene-first-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scene-samples:
+    # Never run untrusted fork code in the image review worker.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      GALLIUM_DRIVER: llvmpipe
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install native C++ software GL and encoding dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential cmake git libglfw3-dev libglm-dev libgl1-mesa-dev \
+            libgl1-mesa-dri xvfb xauth ffmpeg
+      - name: Compile and test native renderer and preview scripts
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+          bash -n scripts/render_scene_previews.sh
+          python3 -m py_compile tests/scene_preview_audit.py
+      - name: Render 8 native scene clips and 32 native stills
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=TERM --kill-after=20s 16m \
+            xvfb-run -a -s '-screen 0 1280x720x24' \
+            bash scripts/render_scene_previews.sh ./build/bigbang output/scene_review \
+            2>&1 | tee scene_previews.log
+      - name: Validate all rendered outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/scene_preview_audit.py output/scene_review \
+            | tee output/scene_review/metrics.log
+          python3 tests/inspect_native_png.py \
+            output/scene_review/stills/*.png \
+            --width 480 --height 270 --allow-flat \
+            > output/scene_review/png_validation.log
+          for clip in output/scene_review/clips/*.mp4; do
+            ffmpeg -hide_banner -loglevel error -xerror -i "$clip" -f null -
+          done
+          ffmpeg -hide_banner -loglevel error -xerror \
+            -i output/scene_review/scene_reel_8_epochs_16s.mp4 -f null -
+          ffprobe -v error -count_frames \
+            -show_entries format=duration:stream=nb_read_frames \
+            -of default=noprint_wrappers=1 \
+            output/scene_review/scene_reel_8_epochs_16s.mp4
+          echo 'Native scene previews decode cleanly; aesthetic signoff is separate.'
+      - name: Preserve scene-specific evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-scene-first-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            output/scene_review/stills/*.png
+            output/scene_review/clips/*.mp4
+            output/scene_review/scene_reel_8_epochs_16s.mp4
+            output/scene_review/storyboard_8x4.png
+            output/scene_review/scene_metrics.json
+            output/scene_review/reel_metadata.json
+            output/scene_review/native_still_sha256.txt
+            output/scene_review/provenance.txt
+            output/scene_review/logs/**
+            output/scene_review/metrics.log
+            output/scene_review/png_validation.log
+            scene_previews.log
+      - name: Explain visual review
+        if: always()
+        run: |
+          echo '### Scene-first native C++ previews' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Eight two-second motion clips, 32 native RGB PNGs and 16s reel are 480x270 / 30fps diagnostic outputs.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'The 300-second master is unchanged in this workflow and is NOT automatically rerendered. Cinematic and scientific quality require human review.' >> "$GITHUB_STEP_SUMMARY"

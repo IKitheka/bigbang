@@ -134,6 +134,19 @@ int main() {
         assert(glm::length(a.position-b.position)<0.0001f);
         assert(std::abs(a.focalLengthMm-b.focalLengthMm)<0.0001f);
     }
+    // New hero-galaxy look-at does not alter the previously approved
+    // primordial camera interval; the cinematic target evolves smoothly.
+    assert(glm::length(cinematic::targetAt(20.0f)) == 0.0f);
+    assert(glm::length(cinematic::targetAt(240.0f)) == 0.0f);
+    assert(glm::length(cinematic::targetAt(245.0f)) > 0.0f);
+    assert(glm::length(cinematic::targetAt(290.0f) -
+                       glm::vec3(0.8f,3.5f,0.1f)) < 0.0001f);
+    assert(glm::length(cinematic::targetAt(240.001f) -
+                       cinematic::targetAt(240.0f)) < 0.0001f);
+    const auto galCamera240=cinematic::cameraAt(240.0f);
+    const auto galCamera300=cinematic::cameraAt(299.999f);
+    assert(galCamera300.position.y > galCamera240.position.y);
+    assert(galCamera300.focalLengthMm > galCamera240.focalLengthMm);
     invalid({"bigbang","--start-frame","1","--end-frame","9001","--fps","30","--raw-video","-"});
     invalid({"bigbang","--start-frame","5","--end-frame","4","--raw-video","-"});
     invalid({"bigbang","--start-frame","1","--raw-video","-"});

@@ -17,7 +17,9 @@ concurrency:
   cancel-in-progress: true
 jobs:
   review-film:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    # Expensive full 9000-frame render must be deliberately requested.
+    # Pull requests use the small, dedicated scene-preview workflow instead.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     env:

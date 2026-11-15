@@ -22,9 +22,12 @@ vec3 lateGalaxy(vec3 origin, vec3 ray, float t, int index,
                 out float obscuration) {
     float fi = float(index);
     vec3 center = lateGalaxyCenter(index);
-    vec3 normal = normalize(index == 0 ? vec3(0.16, -0.48, 0.86) :
-                            (index == 1 ? vec3(-0.52, -0.35, 0.78) :
-                                          vec3(0.36, -0.76, 0.54)));
+    // Inclined thin rotating gas disks, deliberately not near-spherical
+    // volumes. The viewing angles vary so one disk reads edge-on while
+    // another reveals the ragged arm structure.
+    vec3 normal = normalize(index == 0 ? vec3(0.14, 0.60, 0.78) :
+                            (index == 1 ? vec3(-0.35, 0.82, 0.45) :
+                                          vec3(0.61, 0.69, 0.41)));
     vec3 axisX = normalize(cross(vec3(0.0,0.0,1.0), normal));
     vec3 axisY = cross(normal, axisX);
     vec3 rel = origin-center;
@@ -33,9 +36,9 @@ vec3 lateGalaxy(vec3 origin, vec3 ray, float t, int index,
     float development = smoothstep(252.0+fi*3.0, 298.0, t);
     float firstCluster = smoothstep(243.0+fi*4.0, 261.0+fi*3.0, t);
     float radius = mix(1.65, index == 0 ? 4.5 : 2.65, development);
-    float height = mix(0.64,0.22,development);
+    float height = mix(0.42,0.11,development);
     // Closest approach to the ellipsoid bounds a compact integration range.
-    vec3 scale = vec3(radius*1.12,radius*1.12,height*5.0);
+    vec3 scale = vec3(radius*1.12,radius*1.12,height*3.7);
     vec3 so = o/scale, sd = d/scale;
     float a = dot(sd,sd);
     float b = dot(so,sd);
@@ -46,10 +49,10 @@ vec3 lateGalaxy(vec3 origin, vec3 ray, float t, int index,
     float entry = max(0.0,(-b-root)/a);
     float leave = (-b+root)/a;
     if (leave <= entry) return vec3(0.0);
-    float stepSize = (leave-entry)/8.0;
+    float stepSize = (leave-entry)/12.0;
     float transmittance = 1.0;
     vec3 result = vec3(0.0);
-    for (int j=0; j<8; ++j) {
+    for (int j=0; j<12; ++j) {
         vec3 q = o+d*(entry+(float(j)+0.5)*stepSize);
         float r = length(q.xy);
         float rn = r/radius;
@@ -62,30 +65,71 @@ vec3 lateGalaxy(vec3 origin, vec3 ray, float t, int index,
         // Initially amorphous clusters acquire a rotationally supported disc
         // gradually. The arms remain a broad density enhancement with broken
         // star-forming regions, rather than repeated bright spiral outlines.
-        float arm = pow(0.5+0.5*cos(turn+0.55*irregularity),4.0);
+        float arm = pow(0.5+0.5*cos(turn+1.20*(irregularity-0.5)),8.0);
         arm *= smoothstep(0.12,0.35,rn)*(1.0-smoothstep(0.68,1.0,rn));
         float vertical = exp(-abs(q.z)/height);
         float radial = exp(-2.8*rn)*(1.0-smoothstep(0.76,1.12,rn));
         float disc = vertical*radial;
-        float bulgeRadius = length(q*vec3(1.0,1.0,1.65));
+        float bulgeRadius = length(q*vec3(1.0,1.0,2.80));
         float bulge = exp(-bulgeRadius/(0.18*radius));
         float clumps = smoothstep(0.42,0.76,irregularity)*
                        smoothstep(0.24,0.74,mottling);
-        float stars = disc*mix(0.52,0.17,development);
-        stars += development*disc*(2.8*arm*(0.18+1.5*clumps)+0.08*clumps);
+        float stars = disc*mix(0.52,0.065,development);
+        stars += development*disc*(5.8*arm*(0.12+1.9*clumps)+0.045*clumps);
         float young = development*disc*arm*clumps;
-        float dust = disc*(0.35+2.8*arm)*(0.18+1.4*irregularity)*development;
+        float dust = disc*(0.35+5.2*arm)*(0.18+1.4*irregularity)*development;
         float alpha = 1.0-exp(-dust*stepSize*2.3);
-        vec3 oldStars = mix(vec3(0.79,0.72,0.60),
+        vec3 oldStars = mix(vec3(0.93,0.70,0.46),
                            vec3(0.69,0.75,0.80),development*0.32);
-        vec3 emission = oldStars*(stars*0.65+bulge*0.30) +
-                        vec3(0.62,0.71,0.80)*young*1.0;
+        vec3 emission = oldStars*(stars*0.55+bulge*0.33) +
+                        vec3(0.36,0.62,1.03)*young*2.35;
         emission *= boundary;
         // Sub-resolution stellar granularity is deterministic in 3D; its
         // contrast stays low to avoid swimming, glitter and neon star lanes.
         emission *= 0.62+0.76*mottling;
         result += transmittance*emission*stepSize*firstCluster;
         transmittance *= 1.0-alpha;
+    }
+    // Add stars on the *same local 3D disk plane*, as unresolved irregular
+    // point populations. Unlike a star-textured sphere or billboard these
+    // positions remain anchored to the galaxy under camera motion.
+    // Finite plane intersections avoid drawing points through the camera.
+    if (development > 0.025 && abs(d.z)>0.028) {
+        float planeT=-o.z/d.z;
+        if (planeT>0.0) {
+            vec3 crossPt=o+d*planeT;
+            float rn=length(crossPt.xy)/radius;
+            if (rn<1.0) {
+                vec2 gridPos=crossPt.xy*7.0;
+                vec2 centralCell=floor(gridPos);
+                float localArm=pow(0.5+0.5*cos(2.0*atan(crossPt.y,crossPt.x)-
+                                     3.4*log(rn+0.12)-0.030*(t-240.0)+fi*2.3),6.0);
+                float radialWeight=exp(-1.50*rn*rn)*
+                                  (1.0-smoothstep(0.83,1.0,rn));
+                vec3 pinpoint=vec3(0);
+                for (int gx=-1; gx<=1; ++gx)
+                for (int gy=-1; gy<=1; ++gy) {
+                    vec2 cell=centralCell+vec2(float(gx),float(gy));
+                    vec3 seed=vec3(cell,fi*17.3+11.4);
+                    vec2 jitter=vec2(hash31(seed),hash31(seed+vec3(6.3,1.4,7.7)));
+                    vec2 offset=cell+jitter-gridPos;
+                    float d2=dot(offset,offset);
+                    float starVisible=step(0.55,hash31(seed+vec3(2.3,4.1,0.5)));
+                    float light=exp(-25.0*d2)*starVisible;
+                    float young=step(0.72,hash31(seed+vec3(3.9,8.2,1.2)));
+                    vec3 color=mix(vec3(0.83,0.73,0.60),vec3(0.62,0.76,0.93),
+                                   young);
+                    pinpoint+=color*light*(0.25+0.9*localArm*young);
+                }
+                // Stars emerge *within* a dusty flattened disk; this isn't
+                // an unrelated all-sky white dot field.
+                float dustLane=valueNoise(crossPt*vec3(0.63,0.63,0.09)+fi*10.0);
+                float starObscuration=mix(0.77,0.39,
+                                          smoothstep(0.49,0.77,dustLane));
+                result+=pinpoint*(0.41*development*radialWeight*
+                                   starObscuration*firstCluster);
+            }
+        }
     }
     obscuration = 1.0-transmittance;
     return result;
