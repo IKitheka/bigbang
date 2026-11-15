@@ -98,7 +98,17 @@ jobs:
               mae=float(np.mean(np.abs(actual-reference)))
               print(f'Native C++ still versus RGB24 video at t={t}s: MAE={mae:.3f}')
               assert mae<8.0,f'Corrupt/interleaved RGB24 video at t={t}: MAE={mae}'
-          print('PASS: movie colors agree with individually rendered C++ reference')
+          print('PASS: movie colors agree with independently rendered C++ reference')
+          # At film t=255s the dust should still leave dark, legible galaxy
+          # background. The first V9 looktest scored 0.27 luma (too milky).
+          frame=rgb(['ffmpeg','-v','error','-ss','17',
+              '-i',f'{O}/native_video_silent.mp4','-frames:v','1',
+              '-pix_fmt','rgb24','-f','rawvideo','pipe:1'])
+          channels=frame.reshape(-1,3)
+          luma=np.mean((.2126*channels[:,0]+.7152*channels[:,1]+.0722*channels[:,2])/255.)
+          print(f'V9 contrast gate at film t=255s: mean SDR luma={luma:.4f}')
+          assert luma<0.22,f'Dust bridge too bright at t=255s: {luma:.4f}'
+          print('PASS: galaxy sky retains visual contrast through V9 bridge')
           PY
       - name: Synthesize original audio and validate native shot
         shell: bash
