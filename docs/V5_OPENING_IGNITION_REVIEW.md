@@ -33,3 +33,17 @@ Only `shaders/postprocess/nasa_origin.frag` changes. The nebula, eight forming p
 5. Seek owner approval before any merge or costly full-film render. **Do not re-render 9,000 frames automatically.**
 
 Current status: **candidate / not artistically approved**. The approved recoverable five-minute V4 export remains the baseline.
+
+## Native C++ evidence checked 15 November 2026
+
+Bounded full-engine [NASA C++ looktest run 43725816991](https://github.com/IKitheka/bigbang/actions/runs/43725816991) **passed** on the V5 draft PR #18. It compiled the candidate and baseline native C++ sources, rendered 17 native stills plus the protected source frames, encoded the short opening and galaxy samples, and uploaded original PNG/video evidence. This is not a full five-minute production render.
+
+Critical protection assertion, independently byte-compared from the uploaded artifacts:
+
+| Film time | Native V5 candidate versus native V4 baseline |
+|---|---|
+| 18 s | Identical PNG bytes — PASS |
+| 20 s | Identical PNG bytes — PASS |
+| 22 s | Identical PNG bytes — PASS |
+
+The other four bounded preview workflows for PR #18 passed: native C++ preview, native M1.2 motion, M1.3 50-second transition, and scene-first cinematic previews. The native looktest opened at 480×270/10 FPS, i.e. **diagnostic frame sampling**, not proof of full 1080p/30 FPS quality. Owner cinematic approval and 1080p motion inspection remain pending. The final 40 seconds of the established V4 film remain the approved, unmodified production baseline.
