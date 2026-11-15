@@ -28,9 +28,11 @@ vec3 lateGalaxy(vec3 origin, vec3 ray, float t, int index,
                 out float obscuration) {
     float fi=float(index);
     vec3 center=lateGalaxyCenter(index);
-    vec3 normal=normalize(index==0 ? vec3(0.16,-0.48,0.86) :
-                          (index==1 ? vec3(-0.52,-0.35,0.78) :
-                                      vec3(0.36,-0.76,0.54)));
+    // The main galaxy should be seen at an angle rather than face-on;
+    // otherwise even thin 3D disks collapse to circular glowing blobs.
+    vec3 normal=normalize(index==0 ? vec3(0.14,0.60,0.78) :
+                          (index==1 ? vec3(-0.35,0.82,0.45) :
+                                      vec3(0.61,0.69,0.41)));
     vec3 axisX=normalize(cross(vec3(0.0,0.0,1.0),normal));
     vec3 axisY=cross(normal,axisX);
     vec3 rel=origin-center;
