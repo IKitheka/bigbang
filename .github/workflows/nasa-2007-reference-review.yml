@@ -1,0 +1,91 @@
+name: Inspect NASA 2007 reference visuals
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/nasa-2007-reference-review.yml'
+      - 'docs/NASA_2007_VISUAL_REFERENCE.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sample-source-video:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Download exact NASA Goddard 2007 source for reference only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output/nasa_2007/samples
+          PRIMARY='https://svs.gsfc.nasa.gov/vis/a010000/a010100/a010128/BigBang_HD_LARGE_QT_Video_1.mp4'
+          SECONDARY='https://svs.gsfc.nasa.gov/vis/a010000/a010100/a010128/BigBang_HD_LARGE_QT_Video_2.webmhd.webm'
+          if curl -fLSs --retry 2 --connect-timeout 12 --max-time 100 \
+               "$PRIMARY" -o /tmp/nasa_bigbang_2007.mp4; then
+            echo "$PRIMARY" > output/nasa_2007/source_url.txt
+          else
+            echo 'Primary format unavailable; trying NASA WebM' >&2
+            curl -fLSs --retry 2 --connect-timeout 12 --max-time 100 \
+              "$SECONDARY" -o /tmp/nasa_bigbang_2007.mp4
+            echo "$SECONDARY" > output/nasa_2007/source_url.txt
+          fi
+          ffprobe -v error -show_entries \
+            format=duration,size:stream=codec_name,width,height,avg_frame_rate,codec_type \
+            -of json /tmp/nasa_bigbang_2007.mp4 > output/nasa_2007/reference_metadata.json
+          sha256sum /tmp/nasa_bigbang_2007.mp4 > output/nasa_2007/source_sha256.txt
+      - name: Extract evenly spaced real frames for cinematic matching
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,subprocess,pathlib
+          folder=pathlib.Path('output/nasa_2007')
+          meta=json.loads((folder/'reference_metadata.json').read_text())
+          dur=float(meta['format']['duration'])
+          if not (10<=dur<=900):
+              raise ValueError(f'Unexpected NASA source duration {dur}')
+          n=18
+          rows=[]
+          for i in range(n):
+              sec=(i+0.5)*dur/n
+              dest=folder/'samples'/f'frame_{i:02d}.png'
+              subprocess.run([
+                  'ffmpeg','-hide_banner','-loglevel','error','-y',
+                  '-ss',f'{sec:.3f}','-i','/tmp/nasa_bigbang_2007.mp4',
+                  '-frames:v','1','-vf','scale=640:-2',str(dest)],
+                  check=True,timeout=35)
+              rows.append({'index':i,'time_seconds':round(sec,3),'file':str(dest)})
+          (folder/'sample_times.json').write_text(json.dumps({
+              'video_id':'LeUcjqqhNxM','source':'NASA SVS #10128 (2007)',
+              'duration_seconds':dur,'sample_count':n,'frames':rows
+          },indent=2)+'\n')
+          PY
+          ffmpeg -hide_banner -loglevel error -y -framerate 1 \
+            -i 'output/nasa_2007/samples/frame_%02d.png' \
+            -vf 'tile=3x6:margin=10:padding=9:color=black' -frames:v 1 \
+            output/nasa_2007/scene_storyboard.png
+          echo 'NASA credit: Dana Berry (Skyworks Digital), NASA Goddard SVS 10128.' \
+            > output/nasa_2007/credits.txt
+          echo 'These source frames are for studying composition and shot progression, NOT for inclusion in the native C++ final video.' \
+            >> output/nasa_2007/credits.txt
+      - name: Upload reference analysis only (not original video)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nasa-2007-visual-storyboard-${{ github.run_id }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            output/nasa_2007/scene_storyboard.png
+            output/nasa_2007/samples/frame_*.png
+            output/nasa_2007/sample_times.json
+            output/nasa_2007/reference_metadata.json
+            output/nasa_2007/source_sha256.txt
+            output/nasa_2007/source_url.txt
+            output/nasa_2007/credits.txt
