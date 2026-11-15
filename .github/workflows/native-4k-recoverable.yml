@@ -95,7 +95,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m py_compile delivery/scripts/assemble_native_4k.py
-          gh run download "$RECOVERY_RUN" --name uhd-part-097 --dir output/test-input/part
+          gh run download 43749106085 --name uhd-part-097 --dir output/test-input/part
           python3 - <<'PY'
           import importlib.util, json, os, shutil
           from pathlib import Path
@@ -209,7 +209,7 @@ jobs:
           name: uhd-renderer
           path: output/build
       - name: Restore prior part without changing its identity
-        if: matrix.recover
+        if: matrix.recover && github.run_attempt == 1
         uses: actions/download-artifact@v4
         with:
           name: uhd-part-${{ matrix.id }}
@@ -263,7 +263,7 @@ jobs:
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
               f.write('\n~~~json\n'+json.dumps(report,indent=2)+'\n~~~\n')
           PY
-          ffmpeg -nostdin -v error -i output/part/film.mp4 -vf 'select=eq(n\,0)+eq(n\,44)+eq(n\,89),scale=640:360,tile=3x1' -frames:v 1 output/part/review-contact.jpg
+          ffmpeg -nostdin -v error -y -i output/part/film.mp4 -vf 'select=eq(n\,0)+eq(n\,44)+eq(n\,89),scale=640:360,tile=3x1' -frames:v 1 output/part/review-contact.jpg
       - name: Preserve every verified chunk, manifest and failure log
         if: always()
         uses: actions/upload-artifact@v4
