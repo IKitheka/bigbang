@@ -1,0 +1,147 @@
+name: V10 full native five-minute screening cut (480x270, 30 FPS)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/v10-native-300s-screening.yml'
+      - 'scripts/assemble_v10_review.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v10-native-screening-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-segments:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    name: "Native segment ${{ matrix.id }}"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 49
+    env:
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      GALLIUM_DRIVER: llvmpipe
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        include:
+          - {id: '01', first: 1, last: 600}
+          - {id: '02', first: 601, last: 1500}
+          - {id: '03', first: 1501, last: 2460}
+          - {id: '04', first: 2461, last: 3480}
+          - {id: '05', first: 3481, last: 4470}
+          - {id: '06', first: 4471, last: 5280}
+          - {id: '07', first: 5281, last: 5880}
+          - {id: '08', first: 5881, last: 6600}
+          - {id: '09', first: 6601, last: 7200}
+          - {id: '10', first: 7201, last: 7800}
+          - {id: '11', first: 7801, last: 8400}
+          - {id: '12', first: 8401, last: 9000}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install native OpenGL renderer and FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential cmake git libglfw3-dev libglm-dev \
+            libgl1-mesa-dev libgl1-mesa-dri xvfb xauth ffmpeg
+      - name: Compile C++ renderer and run unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+          # V10 is INTEGRATION only; no changes to cinematic source
+          git diff --exit-code origin/feature/v9-galaxy-to-solar-bridge -- src include shaders
+      - name: Capture native segment, checkpoint every 150 frames
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output/v10_submission
+          timeout --signal=TERM --kill-after=15s 43m \
+            xvfb-run -a -s '-screen 0 1024x768x24' \
+            python3 scripts/render_film.py \
+            --binary build/bigbang \
+            --output-dir output/v10_segment_${{ matrix.id }} \
+            --first-frame ${{ matrix.first }} --end-frame ${{ matrix.last }} \
+            --width 480 --height 270 --fps 30 \
+            --chunk-frames 150 --chunk-timeout 1000 \
+            --preset fast --crf 18
+          cp output/v10_segment_${{ matrix.id }}/film.mp4 \
+             output/v10_submission/part_${{ matrix.id }}.mp4
+          cp output/v10_segment_${{ matrix.id }}/manifest.json \
+             output/v10_submission/manifest_${{ matrix.id }}.json
+          cp output/v10_segment_${{ matrix.id }}/checkpoint.json \
+             output/v10_submission/checkpoint_${{ matrix.id }}.json
+          git rev-parse HEAD > output/v10_submission/commit_${{ matrix.id }}.txt
+          sha256sum output/v10_submission/part_${{ matrix.id }}.mp4 \
+            > output/v10_submission/sha256_${{ matrix.id }}.txt
+          ls -lh output/v10_submission/part_${{ matrix.id }}.mp4
+      - name: Upload recoverable native source segments
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v10-native-part-${{ matrix.id }}-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            output/v10_submission/*
+            output/v10_segment_${{ matrix.id }}/checkpoint.json
+            output/v10_segment_${{ matrix.id }}/logs/*.renderer.log
+
+  screening-master:
+    name: Join 9000 native frames and original score; release one GitHub ZIP
+    needs: native-segments
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install H264, original-score and storyboard dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            ffmpeg python3-numpy
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: v10-native-part-*-${{ github.run_id }}
+          path: output/v10_incoming
+          merge-multiple: true
+      - name: Assemble, fully decode and analyze chapter transitions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/assemble_v10_review.py
+          python3 scripts/assemble_v10_review.py \
+            --incoming output/v10_incoming \
+            --out output/v10_final \
+            --expected-sha "$GITHUB_SHA"
+      - name: Upload complete V10 ZIP for user to download via GitHub
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BigBang_V10_Complete_5min_480p30_Original_Sound
+          if-no-files-found: warn
+          retention-days: 30
+          compression-level: 6
+          path: |
+            output/v10_final/BigBang_V10_Integrated_5min_Native_480p30_With_Sound.mp4
+            output/v10_final/V10_24_Frame_Storyboard.jpg
+            output/v10_final/V10_Validation_and_Transition_Audit.json
+            output/v10_final/README_WATCH.txt
+      - name: Document release status and resolution honesty
+        if: always()
+        shell: bash
+        run: |
+          echo "### V10: 300 seconds / 9000 native C++ OpenGL frames at 480x270 and 30 FPS" >> "$GITHUB_STEP_SUMMARY"
+          echo "This is a **low-resolution screening master**. Audio is an independently synthesized original stereo score. It is NOT the final true-1080p film." >> "$GITHUB_STEP_SUMMARY"
+          echo "Artist approval and full-size production render remain separate milestones. The approved V4 Solar System is unchanged at 260-300s." >> "$GITHUB_STEP_SUMMARY"
