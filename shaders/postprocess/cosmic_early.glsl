@@ -5,6 +5,15 @@ vec3 earlyEpochRadiance(vec3 origin, vec3 ray, float t) {
     float reactions = smoothstep(84.0, 101.0, epochTime) *
         (1.0 - smoothstep(122.0, 140.0, epochTime));
     float opaque = smoothstep(125.0, 160.0, epochTime);
+    // A *continuous* visual progression. The owner-approved 0–50s and
+    // 240–300s clips are outside this shader's new grade. 90–130s emphasizes
+    // localized hot reaction interfaces; 130–175s develops a high-key
+    // radiation-coupled veil that recombination can gradually disperse.
+    // These are art-directed metaphors, not nuclear reaction dynamics.
+    float nuclearWeight=smoothstep(90.0,105.0,epochTime)*
+                        (1.0-smoothstep(121.0,135.0,epochTime));
+    float mistWeight=smoothstep(126.0,150.0,epochTime)*
+                     (1.0-smoothstep(168.0,182.0,epochTime));
     // Separate QGP visual language from the grey radiation-fold metaphor.
     // This is stylized correlated fluid energy, not individually coloured
     // quarks, an orange fireball, or a physically solved hydrodynamics field.
@@ -82,8 +91,30 @@ vec3 earlyEpochRadiance(vec3 origin, vec3 ray, float t) {
             source *= mix(1.0, 0.82 + 0.36 * microA, reactions);
             source += reactions * vec3(2.6, 1.75, 0.95) * exchange;
         }
-        radiance += transmit * alpha * source;
-        transmit *= 1.0 - alpha;
+        // Primordial nucleosynthesis is NOT an atom diagram. Warm,
+        // intermittent concentrations brighten thin collision interfaces
+        // already embedded in the continuous plasma. Movement follows the
+        // native 3D advected scalar field without screen-space flicker.
+        float knot=smoothstep(0.49,0.72,plasmaFine)*
+                   smoothstep(0.45,0.68,fine)*
+                   exp(-190.0*(coarse-0.55)*(coarse-0.55));
+        float seam=exp(-240.0*(fine-0.59)*(fine-0.59))*
+                   (0.25+0.75*plasmaCoarse);
+        float ignition=nuclearWeight*(knot*2.2+seam*0.54);
+        source+=ignition*vec3(2.10,1.16,0.46);
+        // Reused 3D density correlations produce a broad, spatially varied
+        // scattering medium, instead of the previous near-identical grey
+        // filaments through every scientific era. Emission is treated as
+        // a finite luminous veil over ~20 world units.
+        float cloudVariance=0.24+0.62*smoothstep(0.25,0.74,coarse)+
+                            0.14*fine;
+        float mistAlpha=1.0-exp(-mistWeight*window*
+                           (0.035+0.105*cloudVariance)*EARLY_STEP_LENGTH);
+        vec3 mistColor=mix(vec3(0.57,0.65,0.76),
+                           vec3(1.04,0.98,0.91),
+                           smoothstep(0.39,0.72,coarse));
+        radiance+=transmit*(alpha*source+mistAlpha*mistColor);
+        transmit*=(1.0-alpha)*(1.0-mistAlpha);
         if (transmit < 0.015) break;
     }
     return radiance;
