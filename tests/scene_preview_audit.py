@@ -91,6 +91,15 @@ def main():
             "mean_near_black":round(sum(x["near_black_fraction"] for x in group)/4,5),
             "max_near_white":max(x["near_white_fraction"] for x in group)})
     (ROOT/"scene_metrics.json").write_text(json.dumps(summary,indent=2)+"\n")
+    # Hard engineering gate only: guard against the near-total whiteout
+    # caught during the first QGP design review. Film/art approval is human.
+    plasma=[x for x in records if x["chapter"]==2 and
+            x["time_seconds"] in (65,75,85)]
+    assert len(plasma)==3
+    for x in plasma:
+        assert x["near_white_fraction"]<0.10 and x["mean_sdr_luma"]<0.76, (
+            f"QGP preview overexposed at {x['time_seconds']}s: "
+            f"mean={x['mean_sdr_luma']}, white={x['near_white_fraction']}")
     print(json.dumps(summary["summary_by_scene"],indent=2))
     print("PASS: 32 actual native C++ PNGs parsed and 8 preview clips present")
 
