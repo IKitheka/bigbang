@@ -17,8 +17,8 @@ float v4SolarFormationProgress(float t) {
 vec3 v4NebularEnvelope(vec3 origin,vec3 dir,float t) {
     float arrival=smoothstep(259.0,263.0,t);
     float departure=1.0-smoothstep(274.0,285.0,t);
-    float active=arrival*departure;
-    if(active<0.0001) return vec3(0.0);
+    float emissionWindow=arrival*departure;
+    if(emissionWindow<0.0001) return vec3(0.0);
     float nearPoint=max(0.0,dot(-origin,dir));
     vec3 p=origin+dir*nearPoint;
     float dist=length(p);
@@ -34,7 +34,7 @@ vec3 v4NebularEnvelope(vec3 origin,vec3 dir,float t) {
     vec3 cold=vec3(0.070,0.11,0.19);
     vec3 warm=vec3(0.42,0.21,0.125);
     vec3 emission=mix(cold,warm,clamp(0.34+0.70*sunFacing+0.16*fine,0.0,1.0));
-    return emission*shape*active*(0.25+1.2*opening)*
+    return emission*shape*emissionWindow*(0.25+1.2*opening)*
            (0.78+0.45*fine);
 }
 
