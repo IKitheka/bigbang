@@ -64,6 +64,35 @@ jobs:
             -framerate 30 -i pipe:0 \
             -c:v libx264 -preset veryfast -crf 19 -pix_fmt yuv420p \
             -movflags +faststart output/v8_native/native_video_silent.mp4
+      - name: Verify RGB24 video matches independent C++ stills
+        shell: bash
+        run: |
+          set -euo pipefail
+          O=output/v8_native
+          for t in 205 215 225; do
+            xvfb-run -a -s '-screen 0 1024x768x24' \
+              ./build/bigbang --time "$t" --fps 30 \
+              --width 480 --height 270 --output "$O/native_t$t.png" \
+              > "$O/still_t$t.log" 2>&1
+          done
+          python3 - <<'PY'
+          import numpy as np,subprocess
+          O='output/v8_native'
+          def rgb(command):
+              data=subprocess.check_output(command)
+              assert len(data)==480*270*3,len(data)
+              return np.frombuffer(data,dtype=np.uint8).astype(np.int16)
+          for t in (205,215,225):
+              actual=rgb(['ffmpeg','-v','error','-ss',str(t-190),
+                  '-i',f'{O}/native_video_silent.mp4','-frames:v','1',
+                  '-pix_fmt','rgb24','-f','rawvideo','pipe:1'])
+              reference=rgb(['ffmpeg','-v','error','-i',f'{O}/native_t{t}.png',
+                  '-frames:v','1','-pix_fmt','rgb24','-f','rawvideo','pipe:1'])
+              mae=float(np.mean(np.abs(actual-reference)))
+              print(f'Native C++ still versus RGB24 video at t={t}s: MAE={mae:.3f}')
+              assert mae<8.0,f'Corrupt/interleaved RGB24 video at t={t}: MAE={mae}'
+          print('PASS: movie colors agree with individually rendered C++ reference')
+          PY
       - name: Synthesize original audio and validate native shot
         shell: bash
         run: |
