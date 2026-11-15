@@ -1,5 +1,6 @@
 #include "FilmClock.hpp"
 #include "CinematicStory.hpp"
+#include "CinematicTimeline.hpp"
 #include "PrimordialCamera.hpp"
 #include "UniverseCamera.hpp"
 #include "RenderOptions.hpp"
@@ -41,7 +42,7 @@ int main() {
     // The narrative comes from the source video's full story, compressed into
     // the previously agreed eight-scene 300-second cinematic main cut.
     static_assert(cinematic::isWellFormed(), "No gaps/overlaps in story");
-    assert(cinematic::kChapters.size() == 8);
+    assert(cinematic::kChapters.size() == 9);
     assert(cinematic::kFilmDurationSeconds == film::kDurationSeconds);
     const auto& origin = cinematic::chapterAt(0.0);
     const auto& inflation = cinematic::chapterAt(20.0);
@@ -49,8 +50,9 @@ int main() {
     const auto& nuclei = cinematic::chapterAt(90.0);
     const auto& opaque = cinematic::chapterAt(130.0);
     const auto& cmb = cinematic::chapterAt(170.0);
-    const auto& dark = cinematic::chapterAt(200.0);
+    const auto& dark = cinematic::chapterAt(180.0);
     const auto& galaxies = cinematic::chapterAt(240.0);
+    const auto& solar = cinematic::chapterAt(280.0);
     assert(origin.epoch == cinematic::Epoch::AbstractOrigin);
     assert(inflation.epoch == cinematic::Epoch::Inflation);
     assert(qgp.epoch == cinematic::Epoch::QuarkGluonPlasma);
@@ -60,7 +62,8 @@ int main() {
     assert(dark.epoch == cinematic::Epoch::DarkAges);
     assert(galaxies.epoch == cinematic::Epoch::CosmicDawnGalaxies);
     assert(cinematic::chapterAt(299.99).epoch ==
-           cinematic::Epoch::CosmicDawnGalaxies);
+           cinematic::Epoch::SolarSystem);
+    assert(solar.epoch == cinematic::Epoch::SolarSystem);
     assert(cinematic::chapterAt(49.999).epoch ==
            cinematic::Epoch::Inflation);
     bool rejectedEnd = false;
@@ -90,6 +93,25 @@ int main() {
     const auto camAtBoundary = primordial::cameraAt(50.0f);
     const auto camAfterBoundary = primordial::cameraAt(50.01f);
     assert(glm::length(camAtBoundary.position-camAfterBoundary.position) < 0.001f);
+
+    // Story-clock remapping is continuous and original 18–22s is unchanged.
+    for(float ft:{0.0f,18.0f,20.0f,22.0f,50.0f}) {
+        assert(cinematic::legacySceneTime(ft)==ft);
+    }
+    assert(std::abs(cinematic::legacySceneTime(82.0f)-90.0f)<.00001f);
+    assert(std::abs(cinematic::legacySceneTime(116.0f)-130.0f)<.00001f);
+    assert(std::abs(cinematic::legacySceneTime(149.0f)-170.0f)<.00001f);
+    assert(std::abs(cinematic::legacySceneTime(176.0f)-200.0f)<.00001f);
+    assert(std::abs(cinematic::legacySceneTime(196.0f)-240.0f)<.00001f);
+    assert(std::abs(cinematic::legacySceneTime(260.0f)-299.9f)<.001f);
+    assert(cinematic::legacySceneTime(285.0f)==299.9f);
+    float previous=-1;
+    for(int frame=0;frame<9000;++frame) {
+        const float at=float(frame)/30.0f;
+        const float current=cinematic::legacySceneTime(at);
+        assert(current>=previous);
+        previous=current;
+    }
 
     assert(film::secondsForFrame(1, 30) == 0.0);
     assert(film::secondsForFrame(751, 30) == 25.0);
