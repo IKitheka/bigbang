@@ -44,14 +44,14 @@ vec3 earlyEpochRadiance(vec3 origin, vec3 ray, float t) {
         float plasmaFine = valueNoise(flow*1.78 + vec3(2.5,4.8,epochTime*0.087));
         float ribbon = exp(-155.0*pow(plasmaCoarse-0.565,2.0));
         float vortex = smoothstep(0.46,0.74,plasmaFine);
-        float cavities = smoothstep(0.35,0.63,plasmaCoarse);
+        float cavities = smoothstep(0.54,0.73,plasmaCoarse);
         float hotEdge = ribbon*(0.38+1.5*vortex);
-        float plasmaDensity = 0.032 + 0.34*cavities + 1.25*hotEdge;
+        float plasmaDensity = 0.002 + 0.085*cavities + 0.62*hotEdge;
         // QGP has a broad hot medium, but emissive optical thickness must
         // retain depth and visible pockets of negative space.
         density = mix(density,plasmaDensity,qgp);
         float optical = mix(0.13, 0.22, opaque) * density * window;
-        optical *= mix(1.0,1.38,qgp);
+        optical *= mix(1.0,0.67,qgp);
         float alpha = 1.0 - exp(-optical * EARLY_STEP_LENGTH);
         vec3 low = vec3(0.025, 0.040, 0.065);
         vec3 hot = mix(vec3(0.23, 0.35, 0.50),
@@ -66,8 +66,8 @@ vec3 earlyEpochRadiance(vec3 origin, vec3 ray, float t) {
         vec3 plasmaHot = vec3(1.15,0.98,0.72);
         vec3 plasmaTint = mix(plasmaCool,plasmaWarm,
                               smoothstep(0.35,0.78,plasmaCoarse));
-        vec3 plasmaSource = plasmaTint*(0.18+1.4*cavities);
-        plasmaSource += plasmaHot*(hotEdge*2.8 + 0.3*vortex*hotEdge);
+        vec3 plasmaSource = plasmaTint*(0.025+0.34*cavities);
+        plasmaSource += plasmaHot*(0.80*hotEdge + 0.06*vortex*hotEdge);
         source = mix(source,plasmaSource,qgp);
         if (reactions > 0.001) {
             // Two counter-advecting fluctuations briefly exchange energy
