@@ -1,0 +1,146 @@
+name: Native UHD assembly acceptance and corruption gates
+
+on:
+  push:
+    branches: [release/native-4k-university-final]
+    paths:
+      - .github/workflows/native-4k-assembly-gates.yml
+      - scripts/assemble_native_4k.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  SOURCE_COMMIT: 461ed7c8f3b93428b2ed869e9238963cdef29f5e
+  RECOVERY_RUN: '43749106085'
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: delivery
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+          path: native
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install validation dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ffmpeg python3-yaml
+      - uses: actions/download-artifact@v4
+        with:
+          name: uhd-renderer
+          run-id: 43749106085
+          github-token: ${{ github.token }}
+          path: output/build
+      - name: Restore exact native executable without rerendering
+        run: |
+          set -euo pipefail
+          (cd output/build && sha256sum --check renderer.tar.sha256)
+          test "$(cat output/build/source-commit.txt)" = "$SOURCE_COMMIT"
+          tar -xf output/build/renderer.tar -C native
+      - name: Check production scripts and protect approved renderer content
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C delivery diff --exit-code "$SOURCE_COMMIT" HEAD -- src include shaders scripts/render_film.py scripts/create_original_score.py
+          python3 - <<'PY'
+          import ast, re, subprocess, yaml
+          from pathlib import Path
+          spec=yaml.safe_load(Path('delivery/.github/workflows/native-4k-recoverable.yml').read_text())
+          count=0
+          for job_name,job in spec['jobs'].items():
+              for i,step in enumerate(job.get('steps',[])):
+                  script=step.get('run','')
+                  if not script:
+                      continue
+                  shell_source=re.sub(r'\$\{\{.*?\}\}','CI_VALUE',script)
+                  subprocess.run(['bash','-n'],input=shell_source,text=True,check=True)
+                  for source in re.findall(r"python3 - <<'PY'\n(.*?)\nPY(?:\n|$)",script,re.S):
+                      ast.parse(source,filename=f'{job_name}/step-{i}')
+                      count+=1
+          assert count>=6,count
+          print(f'PASS: shell syntax and {count} embedded Python scripts; approved renderer content unchanged')
+          PY
+      - name: Test UHD assembly gates against transported native footage
+        if: env.RECOVERY_RUN != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile delivery/scripts/assemble_native_4k.py
+          gh run download "$RECOVERY_RUN" --name uhd-part-097 --dir output/test-input/part
+          python3 - <<'PY'
+          import importlib.util, json, os, shutil
+          from pathlib import Path
+          spec = importlib.util.spec_from_file_location('assembly', 'delivery/scripts/assemble_native_4k.py')
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          incoming, native = Path('output/test-input'), Path('native').resolve()
+          source = os.environ['SOURCE_COMMIT']
+          result = module.audit_parts(incoming,native,source,require_full=False)
+          assert result['verified_frames']==90 and not result['coverage_complete']
+          passed = ['valid transported native 90-frame pilot']
+          def rejected(label, expected, full=False):
+              try:
+                  module.audit_parts(incoming,native,source,require_full=full)
+              except RuntimeError as exc:
+                  assert expected in str(exc), (label, str(exc))
+                  passed.append(label)
+              else:
+                  raise RuntimeError('Invalid input accepted: '+label)
+          rejected('incomplete full-film coverage','Incomplete 9000-frame coverage',True)
+          manifest = incoming/'part/manifest.json'
+          original = manifest.read_bytes()
+          for label,field,value,expected in [
+              ('1080p substitution rejected','width',1920,'Wrong native contract'),
+              ('wrong executable rejected','binary_sha256','0'*64,'Native executable checksum mismatch')]:
+              data = json.loads(original)
+              data['identity'][field] = value
+              manifest.write_text(json.dumps(data))
+              try:
+                  rejected(label,expected)
+              finally:
+                  manifest.write_bytes(original)
+          data = json.loads(original)
+          data['source']['git_head'] = '0'*40
+          manifest.write_text(json.dumps(data))
+          try:
+              rejected('wrong source commit rejected','Wrong source commit')
+          finally:
+              manifest.write_bytes(original)
+          chunk = next((incoming/'part/chunks').glob('*.mp4'))
+          saved = chunk.read_bytes()
+          chunk.write_bytes(bytes([saved[0]^1])+saved[1:])
+          try:
+              rejected('corrupt transported chunk rejected','Transport corruption')
+          finally:
+              chunk.write_bytes(saved)
+          shutil.copytree(incoming/'part',incoming/'duplicate')
+          try:
+              rejected('duplicate frame coverage rejected','Duplicate part')
+          finally:
+              shutil.rmtree(incoming/'duplicate')
+          Path('output/build/assembly-gate-tests.json').write_text(json.dumps({'passed':passed,'count':len(passed)},indent=2)+'\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
+              f.write('\nAssembly preflight: '+str(len(passed))+' real-footage acceptance/rejection checks passed.\n')
+          PY
+      - name: Preserve acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-uhd-assembly-gates
+          path: output/build/assembly-gate-tests.json
+          if-no-files-found: warn
+          retention-days: 90
