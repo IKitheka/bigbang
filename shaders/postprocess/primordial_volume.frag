@@ -167,13 +167,13 @@ void main() {
                             0.27*filaments;
             float altitude = smoothstep(1.0,5.0,distanceAlongRay) *
                 (1.0-smoothstep(23.0,34.0,distanceAlongRay));
-            expansionAlpha = 1.0-exp(-0.42*expansionWeight*density *
+            expansionAlpha = 1.0-exp(-0.050*expansionWeight*density *
                 altitude*STEP_LENGTH*2.0);
-            float luminous = smoothstep(0.18,0.85,density);
-            vec3 deepBlue = vec3(0.15,0.24,0.52);
-            vec3 violetSilver = vec3(0.92,0.75,1.12);
+            float luminous = smoothstep(0.34,0.88,density);
+            vec3 deepBlue = vec3(0.06,0.10,0.27);
+            vec3 violetSilver = vec3(0.98,0.79,1.16);
             vec3 tintV7 = mix(deepBlue,violetSilver,luminous);
-            expansionColor = tintV7*(0.62+0.70*luminous);
+            expansionColor = tintV7*(0.46+0.90*luminous);
         }
         float combined = 1.0 -
             (1.0-earlyAlpha)*(1.0-qgpAlpha)*(1.0-expansionAlpha);
