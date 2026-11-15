@@ -8,6 +8,7 @@
 #include "PngWriter.hpp"
 #include "UniverseCamera.hpp"
 #include "GalaxyCatalog.hpp"
+#include "CinematicTimeline.hpp"
 #include <glm/gtc/type_ptr.hpp>
 #include <algorithm>
 #include <chrono>
@@ -104,6 +105,7 @@ int main(int argc,char** argv) {
         Shader composite(root+"/shaders/postprocess/screen.vert",root+"/shaders/postprocess/composite.frag");
         Shader primordial(root+"/shaders/postprocess/screen.vert",root+"/shaders/postprocess/primordial_volume.frag");
         Shader nasaOrigin(root+"/shaders/postprocess/screen.vert",root+"/shaders/postprocess/nasa_origin.frag");
+        Shader solarSystem(root+"/shaders/postprocess/screen.vert",root+"/shaders/postprocess/solar_system.frag");
         Shader evolution(root+"/shaders/postprocess/screen.vert",root+"/shaders/postprocess/cosmic_evolution.frag");
         cinematic::GalaxyCatalog deepField(root);
         int initialWidth=0,initialHeight=0;
@@ -134,31 +136,44 @@ int main(int argc,char** argv) {
             glViewport(0,0,width,height);
             glClearColor(.002f,.001f,.008f,1); glClear(GL_COLOR_BUFFER_BIT);
             glDisable(GL_BLEND);
-            // STAGES 1/4/6/8: procedural world medium, shading, bounded depth and
-            // native fragment-ray transport. No M0 orange-particle placeholders.
-            if(t<=56.0f) drawVolume(primordial,primordial::cameraAt(t),t,width,height,quad);
-            if(t<18.0f) {
-                // User-selected NASA 2007 opening: magenta-white ignition,
-                // brief controlled brilliance and soft milk-grey transition.
-                // Protected native opening 18–22s remains EXACTLY unchanged.
+            // Independently art-directed time compression: the old dark/gas
+            // period is shortened without cropping the five-minute film.
+            // Original 0–50s rendering, including protected 18–22s, is exact.
+            const float sceneT=cinematic::legacySceneTime(t);
+            // STAGES 1/4/6/8: world-space procedural early-universe volume,
+            // original NASA-style opening, and true 3D galaxy catalogue.
+            // Fade down expensive old epochs once the Solar System fills frame.
+            if(t<268.0f) {
+                if(sceneT<=56.0f)
+                    drawVolume(primordial,primordial::cameraAt(sceneT),
+                               sceneT,width,height,quad);
+                if(t<18.0f) {
+                    glEnable(GL_BLEND);
+                    glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+                    drawVolume(nasaOrigin,primordial::cameraAt(t),
+                               t,width,height,quad);
+                    glDisable(GL_BLEND);
+                }
+                if(sceneT>45.0f) {
+                    glEnable(GL_BLEND);
+                    glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+                    drawVolume(evolution,cinematic::cameraAt(sceneT),
+                               sceneT,width,height,quad,cinematic::targetAt(sceneT));
+                    glDisable(GL_BLEND);
+                }
+                if(sceneT>=240.0f)
+                    deepField.draw(sceneT,cinematic::cameraAt(sceneT),
+                                   cinematic::targetAt(sceneT),width,height);
+            }
+            if(t>=259.0f) {
+                // Original 3D ray-sphere Sun, all eight orbiting planets,
+                // Earth/oceans/clouds and Saturn rings are shaded in GLSL.
                 glEnable(GL_BLEND);
                 glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
-                drawVolume(nasaOrigin,primordial::cameraAt(t),t,width,height,quad);
+                drawVolume(solarSystem,cinematic::cameraAt(299.9f),
+                           t,width,height,quad);
                 glDisable(GL_BLEND);
-                glBlendFunc(GL_SRC_ALPHA,GL_ONE);
             }
-            if(t>45.0f) {
-                glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
-                drawVolume(evolution,cinematic::cameraAt(t),t,width,height,quad,
-                           cinematic::targetAt(t));
-                glDisable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA,GL_ONE);
-            }
-            // The NASA-2007-inspired cosmic dawn has thousands of small,
-            // varied galaxies in a fixed 3D catalogue, not three luminous
-            // spheres. This executes inside the native HDR pass.
-            if(t>=240.0f)
-                deepField.draw(t,cinematic::cameraAt(t),cinematic::targetAt(t),
-                               width,height);
             HDRFramebuffer::unbind();
             const GLuint highlights=bloom.render(hdr.getColorTexture(),quad);
             glViewport(0,0,width,height); glDisable(GL_BLEND);
