@@ -5,10 +5,16 @@ vec3 earlyEpochRadiance(vec3 origin, vec3 ray, float t) {
     float reactions = smoothstep(84.0, 101.0, epochTime) *
         (1.0 - smoothstep(122.0, 140.0, epochTime));
     float opaque = smoothstep(125.0, 160.0, epochTime);
+    // Separate QGP visual language from the grey radiation-fold metaphor.
+    // This is stylized correlated fluid energy, not individually coloured
+    // quarks, an orange fireball, or a physically solved hydrodynamics field.
+    // Its weights are zero outside the 52–100s window.
+    float qgp = smoothstep(52.0, 67.0, epochTime) *
+                (1.0 - smoothstep(87.0, 101.0, epochTime));
     vec3 drift = vec3(0.006, -0.003, 0.004) * (epochTime - 170.0);
     float transmit = 1.0;
     vec3 radiance = vec3(0.0);
-    const int EARLY_STEPS = 38;
+    const int EARLY_STEPS = 42;
     const float EARLY_STEP_LENGTH = 0.62;
     for (int i = 0; i < EARLY_STEPS; ++i) {
         float depth = 0.8 + (float(i) + 0.5) * EARLY_STEP_LENGTH;
@@ -26,14 +32,43 @@ vec3 earlyEpochRadiance(vec3 origin, vec3 ray, float t) {
         float lace = sheet * crossing;
         float veil = exp(-180.0 * (coarse - 0.53) * (coarse - 0.53));
         float density = 0.001 + 0.13 * veil + 1.1 * lace;
-        // Sparse radiative folds live inside a very faint absorbing medium;
-        // extinction grows before recombination without filling every gap.
+
+        // Spatially anchored, slow advection. A warped 3D scalar field
+        // produces correlated hot sheets and translucent cavities rather
+        // than a collection of independent neon dots.
+        vec3 flow = p + 0.43 * vec3(
+            sin(p.y * 0.62 + epochTime * 0.034 + sin(p.z*0.34)),
+            cos(p.z * 0.49 - epochTime * 0.029 + sin(p.x*0.27)),
+            sin(p.x * 0.54 + epochTime * 0.026 + cos(p.y*0.31)));
+        float plasmaCoarse = fbm(flow*0.34 + vec3(3.1,8.2,-2.4));
+        float plasmaFine = valueNoise(flow*1.78 + vec3(2.5,4.8,epochTime*0.087));
+        float ribbon = exp(-155.0*pow(plasmaCoarse-0.565,2.0));
+        float vortex = smoothstep(0.46,0.74,plasmaFine);
+        float cavities = smoothstep(0.35,0.63,plasmaCoarse);
+        float hotEdge = ribbon*(0.38+1.5*vortex);
+        float plasmaDensity = 0.032 + 0.34*cavities + 1.25*hotEdge;
+        // QGP has a broad hot medium, but emissive optical thickness must
+        // retain depth and visible pockets of negative space.
+        density = mix(density,plasmaDensity,qgp);
         float optical = mix(0.13, 0.22, opaque) * density * window;
+        optical *= mix(1.0,1.38,qgp);
         float alpha = 1.0 - exp(-optical * EARLY_STEP_LENGTH);
         vec3 low = vec3(0.025, 0.040, 0.065);
         vec3 hot = mix(vec3(0.23, 0.35, 0.50),
                        vec3(0.78, 0.65, 0.47), corrugation);
         vec3 source = low + hot * lace * 2.8;
+        // Desaturated deep cyan-blue shadows against pale amber/ivory,
+        // with turbulence following the same 3D mass distribution.
+        // A few concentrated high-energy streaks provide actual local
+        // structure instead of globally brightening the entire screen.
+        vec3 plasmaCool = vec3(0.055,0.13,0.21);
+        vec3 plasmaWarm = vec3(0.73,0.44,0.25);
+        vec3 plasmaHot = vec3(1.15,0.98,0.72);
+        vec3 plasmaTint = mix(plasmaCool,plasmaWarm,
+                              smoothstep(0.35,0.78,plasmaCoarse));
+        vec3 plasmaSource = plasmaTint*(0.18+1.4*cavities);
+        plasmaSource += plasmaHot*(hotEdge*2.8 + 0.3*vortex*hotEdge);
+        source = mix(source,plasmaSource,qgp);
         if (reactions > 0.001) {
             // Two counter-advecting fluctuations briefly exchange energy
             // where high local amplitudes coincide. These are irregular warm
