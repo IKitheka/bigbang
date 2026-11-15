@@ -56,7 +56,7 @@ mkdir -p output/stills
 First run a bounded native UHD check, then inspect the image, motion and timing:
 
 ~~~bash
-python3 scripts/render_film.py --binary build/bigbang --output-dir output/uhd-check --first-frame 901 --end-frame 930 --width 3840 --height 2160 --fps 30 --chunk-frames 15 --chunk-timeout 270 --preset fast --crf 16
+python3 scripts/render_film.py --binary build/bigbang --output-dir output/uhd-check --first-frame 901 --end-frame 903 --width 3840 --height 2160 --fps 30 --chunk-frames 1 --chunk-timeout 150 --preset fast --crf 16
 ~~~
 
 For headless software capture, prefix the Python capture command with:
@@ -65,7 +65,7 @@ For headless software capture, prefix the Python capture command with:
 LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s '-screen 0 3840x2160x24'
 ~~~
 
-The prefix and capture command belong on the same shell command line. The [bounded UHD workflow](.github/workflows/native-4k-validation.yml) supplies complete examples and preserves native previews, manifest/checkpoint JSON, checksums and failure logs. It renders thirty frames each at ignition, expansion, galaxies, the molecular cloud and Earth. These clips have no soundtrack and are benchmarks, not final deliverables.
+The prefix and capture command belong on the same shell command line. The [bounded UHD workflow](.github/workflows/native-4k-validation.yml) supplies complete examples and preserves native previews, manifest/checkpoint JSON, checksums and failure logs. The current workflow samples three native frames each at ignition, expansion, the molecular cloud and Earth, checkpointing every frame to bound software-render cost. A completed thirty-frame native UHD galaxy sample is retained in [the initial benchmark run](https://github.com/IKitheka/bigbang/actions/runs/43744398179#summary-132904383560). The expansion sample exceeded its initial 270-second budget for fifteen frames; the expensive initial run was stopped and its evidence preserved. Three-frame pilots measure capture feasibility and timing; they are insufficient for motion-quality acceptance. These samples have no soundtrack and are not final deliverables.
 
 After performance, visual and resource checks pass, this explicit invocation requests all 9,000 native UHD frames:
 
