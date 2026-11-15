@@ -48,6 +48,25 @@ void main() {
     light+=vec3(0.55,0.28,0.81)*
            exp(-3.7*r)*burst*0.23;
 
+    // A coherent expanding, finely corrugated violet shock/heat front
+    // strengthens the NASA-inspired ignition without substituting a simple
+    // uniform orange explosion. It expands in the *visualization*, not
+    // physically through a pre-existing exterior space.
+    float eruption=smoothstep(3.2,4.5,t)*
+                   (1.0-smoothstep(8.5,10.7,t));
+    float expansion=smoothstep(3.4,8.1,t);
+    float ripple=fm2(vec2(theta*2.3,t*0.19))-.5;
+    float shellR=0.055+0.62*expansion+0.046*ripple;
+    float shellDiff=(r-shellR)*22.0;
+    float shell=exp(-shellDiff*shellDiff);
+    float filaments=0.48+0.52*pow(abs(sin(theta*9.0+
+                                               t*0.67+6.2*ripple)),2.0);
+    light+=vec3(0.72,0.40,1.17)*shell*eruption*filaments*0.86;
+    // Soft angular ejecta in original HDR; glow/bloom will pick out just
+    // the strongest parts of the halo rather than whitening the entire sky.
+    float corona=exp(-r*3.8)*(0.60+0.40*sin(theta*6.0+t*0.26));
+    light+=vec3(0.36,0.13,0.70)*corona*eruption*0.33;
+
     // A short purposeful high-key transition, as actually present in NASA's
     // chosen reference around 2.7s of its 14s film. Limit it temporally.
     float flash=exp(-pow(abs((t-6.95)/0.82),4.0));
