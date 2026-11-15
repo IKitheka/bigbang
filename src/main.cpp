@@ -13,6 +13,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cerrno>
+#include <unistd.h>
 #include <cstdint>
 #include <iostream>
 #include <stdexcept>
@@ -64,8 +66,18 @@ int main(int argc,char** argv) {
             <<"Use scripts/render_film.py for chunking, validation and safe resume.\n";
         return 0;
     }
-    // Keep the binary frame stream free of logging, including driver messages.
-    if(options.batch) std::cout.rdbuf(std::cerr.rdbuf());
+    // Isolate the raw RGB24 pipe from any C/C++/driver stdout diagnostics.
+    // A single unexpected byte otherwise rotates channels and tears frames.
+    int rawVideoFd=-1;
+    if(options.batch) {
+        rawVideoFd=::dup(STDOUT_FILENO);
+        if(rawVideoFd<0 || ::dup2(STDERR_FILENO,STDOUT_FILENO)<0) {
+            std::cerr<<"ERROR: Cannot isolate raw-video stdout.\n";
+            if(rawVideoFd>=0) ::close(rawVideoFd);
+            return 1;
+        }
+        std::cout.rdbuf(std::cerr.rdbuf());
+    }
     if(!glfwInit()) { std::cerr<<"ERROR: GLFW initialization failed.\n"; return 1; }
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR,3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR,3);
@@ -197,9 +209,18 @@ int main(int argc,char** argv) {
                 if(glGetError()!=GL_NO_ERROR) throw std::runtime_error("OpenGL readback failed");
                 if(options.batch) {
                     const std::size_t stride=std::size_t(width)*3u;
-                    for(int y=height-1;y>=0;--y)
-                        if(std::fwrite(pixels.data()+std::size_t(y)*stride,1,stride,stdout)!=stride)
-                            throw std::runtime_error("Native RGB24 stream write failed");
+                    for(int y=height-1;y>=0;--y) {
+                        const std::uint8_t* row=pixels.data()+std::size_t(y)*stride;
+                        std::size_t remaining=stride;
+                        while(remaining>0) {
+                            const ssize_t n=::write(rawVideoFd,row,remaining);
+                            if(n<0 && errno==EINTR) continue;
+                            if(n<=0) throw std::runtime_error(
+                                "Native RGB24 raw stream write failed");
+                            row+=static_cast<std::size_t>(n);
+                            remaining-=static_cast<std::size_t>(n);
+                        }
+                    }
                     if(cursor==options.frame||cursor%options.fps==0||cursor==options.endFrame)
                         std::cerr<<"Rendered frame "<<cursor<<" t="<<t<<"s\n";
                     if(cursor==options.endFrame) break;
@@ -213,7 +234,9 @@ int main(int argc,char** argv) {
             glfwPollEvents();
         }
         if(options.batch) {
-            if(std::fflush(stdout)!=0) throw std::runtime_error("Native RGB24 stream flush failed");
+            if(::close(rawVideoFd)!=0)
+                throw std::runtime_error("Native RGB24 video descriptor close failed");
+            rawVideoFd=-1;
             if(cursor!=options.endFrame) throw std::runtime_error("Capture interrupted before requested last frame");
             std::cerr<<"Completed "<<(options.endFrame-options.frame+1)<<" native frames in "
                      <<(glfwGetTime()-start)<<" seconds\n";
