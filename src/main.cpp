@@ -7,6 +7,7 @@
 #include "RenderOptions.hpp"
 #include "PngWriter.hpp"
 #include "UniverseCamera.hpp"
+#include "GalaxyCatalog.hpp"
 #include <glm/gtc/type_ptr.hpp>
 #include <algorithm>
 #include <chrono>
@@ -103,6 +104,7 @@ int main(int argc,char** argv) {
         Shader composite(root+"/shaders/postprocess/screen.vert",root+"/shaders/postprocess/composite.frag");
         Shader primordial(root+"/shaders/postprocess/screen.vert",root+"/shaders/postprocess/primordial_volume.frag");
         Shader evolution(root+"/shaders/postprocess/screen.vert",root+"/shaders/postprocess/cosmic_evolution.frag");
+        cinematic::GalaxyCatalog deepField(root);
         int initialWidth=0,initialHeight=0;
         glfwGetFramebufferSize(window,&initialWidth,&initialHeight);
         // STAGE 7: physical output pixel dimensions, same HDR and bloom pipeline.
@@ -140,6 +142,12 @@ int main(int argc,char** argv) {
                            cinematic::targetAt(t));
                 glDisable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA,GL_ONE);
             }
+            // The NASA-2007-inspired cosmic dawn has thousands of small,
+            // varied galaxies in a fixed 3D catalogue, not three luminous
+            // spheres. This executes inside the native HDR pass.
+            if(t>=240.0f)
+                deepField.draw(t,cinematic::cameraAt(t),cinematic::targetAt(t),
+                               width,height);
             HDRFramebuffer::unbind();
             const GLuint highlights=bloom.render(hdr.getColorTexture(),quad);
             glViewport(0,0,width,height); glDisable(GL_BLEND);
