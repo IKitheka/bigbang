@@ -1,0 +1,79 @@
+name: Complete native review film
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'shaders/**'
+      - 'scripts/**'
+      - 'tests/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/native-film-review.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: native-film-review-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  review-film:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      GALLIUM_DRIVER: llvmpipe
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Install native render and verification dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y build-essential cmake git libglfw3-dev libglm-dev libgl1-mesa-dev libgl1-mesa-dri xvfb xauth ffmpeg
+      - name: Build and test C++ and recoverable film delivery
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+          python3 -m unittest discover -s tests -p 'test_film_render.py' -v
+          python3 -m py_compile scripts/render_film.py tests/compare_native_opening.py
+      - name: Verify the protected opening against independently built base
+        run: |
+          set -euo pipefail
+          mkdir -p work/base
+          git archive e6d299579a1b06d3d9dcb2e79bddafb8784d0a7e | tar -x -C work/base
+          cmake -S work/base -B work/base/build -DCMAKE_BUILD_TYPE=Release -DFETCHCONTENT_SOURCE_DIR_GLAD="$PWD/build/_deps/glad-src"
+          cmake --build work/base/build --parallel 2
+          timeout --kill-after=15s 8m xvfb-run -a -s '-screen 0 1280x720x24' python3 tests/compare_native_opening.py --base-binary work/base/build/bigbang --candidate-binary build/bigbang --output-dir output/film_evidence/protected
+      - name: Render all eight native chapters as a 300-second review film
+        run: |
+          set -euo pipefail
+          mkdir -p output/film_evidence
+          git rev-parse HEAD > output/film_evidence/source_commit.txt
+          # Explicitly authorized review: 640x360/30fps/9000 frames, never 4K.
+          timeout --signal=TERM --kill-after=20s 28m xvfb-run -a -s '-screen 0 1280x720x24' python3 scripts/render_film.py --binary build/bigbang --output-dir output/full_review --width 640 --height 360 --fps 30 --chunk-frames 300 --crf 16 2>&1 | tee output/film_evidence/full_review.log
+          ffprobe -v error -count_frames -show_entries format=duration,size:stream=codec_name,width,height,avg_frame_rate,nb_read_frames -of json output/full_review/film.mp4 > output/film_evidence/video_metadata.json
+      - name: Upload film, checkpoints, actual PNG regression and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-complete-film-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            output/full_review/film.mp4
+            output/full_review/chunks/*.mp4
+            !output/full_review/chunks/*.partial.mp4
+            output/full_review/manifest.json
+            output/full_review/checkpoint.json
+            output/full_review/logs/**
+            output/film_evidence/**
+      - name: State the review limits
+        if: always()
+        run: |
+          echo '### Native review film' >> "$GITHUB_STEP_SUMMARY"
+          echo 'C++17/OpenGL/GLSL renders all pixels. Python supervises/validates and FFmpeg encodes. A complete film requires successful final frame-count and full-decode validation; partial failure artifacts are not a finished film.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Review only; no 4K production, paid resources, main merge or artistic approval. Download the film artifact; inspect checkpoint status and media.' >> "$GITHUB_STEP_SUMMARY"

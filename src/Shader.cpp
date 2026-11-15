@@ -5,6 +5,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <utility>
+#include <filesystem>
 
 std::string Shader::readFile(const std::string& path) {
     std::ifstream file(path);
@@ -16,7 +17,23 @@ std::string Shader::readFile(const std::string& path) {
     std::stringstream buffer;
     buffer << file.rdbuf();
 
-    return buffer.str();
+    const std::string source = buffer.str();
+    // Existing shaders without includes keep exactly their original bytes.
+    if (source.find("#include \"") == std::string::npos) return source;
+    std::istringstream lines(source);
+    std::string line, expanded;
+    while (std::getline(lines,line)) {
+        if (line.rfind("#include \"",0) == 0) {
+            const auto end=line.find('"',10);
+            if (end==std::string::npos) throw std::runtime_error("Malformed GLSL include");
+            const auto child=line.substr(10,end-10);
+            if (child.find("..")!=std::string::npos || child.find('/')!=std::string::npos)
+                throw std::runtime_error("GLSL include must be a sibling filename");
+            expanded += readFile((std::filesystem::path(path).parent_path()/child).string());
+            expanded += '\n';
+        } else expanded += line+'\n';
+    }
+    return expanded;
 }
 
 GLuint Shader::compileShader(GLenum type, const std::string& source) {

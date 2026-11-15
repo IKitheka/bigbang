@@ -1,6 +1,7 @@
 #include "FilmClock.hpp"
 #include "CinematicStory.hpp"
 #include "PrimordialCamera.hpp"
+#include "UniverseCamera.hpp"
 #include "RenderOptions.hpp"
 #include "PngWriter.hpp"
 
@@ -115,6 +116,30 @@ int main() {
         assert(!opts.capture && opts.fps == 60 && opts.width == 1280);
     }
     assert(parse({"bigbang", "--help"}).showHelp);
+    {
+        const auto info = parse({"bigbang", "--renderer-info", "--width", "16", "--height", "16"});
+        assert(info.rendererInfo && info.capture && !info.batch && info.output.empty());
+    }
+    invalid({"bigbang", "--renderer-info", "--time", "20", "--output", "frame.png"});
+    invalid({"bigbang", "--renderer-info", "--start-frame", "1", "--end-frame", "2", "--raw-video", "-"});
+    {
+        const auto batch=parse({"bigbang","--start-frame","6001","--end-frame","9000",
+            "--fps","30","--width","1280","--height","720","--raw-video","-"});
+        assert(batch.batch && batch.capture && batch.frame==6001 && batch.endFrame==9000);
+        assert(batch.timeSeconds==200.0);
+    }
+    for(float boundary:{90.0f,130.0f,170.0f,200.0f,240.0f,270.0f}) {
+        const auto a=cinematic::cameraAt(boundary);
+        const auto b=cinematic::cameraAt(boundary+0.001f);
+        assert(glm::length(a.position-b.position)<0.0001f);
+        assert(std::abs(a.focalLengthMm-b.focalLengthMm)<0.0001f);
+    }
+    invalid({"bigbang","--start-frame","1","--end-frame","9001","--fps","30","--raw-video","-"});
+    invalid({"bigbang","--start-frame","5","--end-frame","4","--raw-video","-"});
+    invalid({"bigbang","--start-frame","1","--raw-video","-"});
+    invalid({"bigbang","--start-frame","1","--end-frame","2","--raw-video","movie.mp4"});
+    invalid({"bigbang","--start-frame","1","--end-frame","2","--raw-video","-","--width","3840"});
+    invalid({"bigbang","--start-frame","1","--end-frame","2","--raw-video","-","--time","20"});
 
     invalid({"bigbang", "--fps", "24"});
     invalid({"bigbang", "--time", "300", "--output", "test.png"});
