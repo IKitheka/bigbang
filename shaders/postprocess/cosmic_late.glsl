@@ -249,13 +249,26 @@ vec3 lateEpochRadiance(vec3 origin, vec3 ray, float t) {
         // to a deep-black field while myriad *separate* galaxies appear.
         // The galaxy catalogue itself is drawn in native HDR by C++ later.
         // Do NOT add back the prior three gigantic ellipsoidal fake galaxies.
-        float haze=smoothstep(239.0,251.0,t)*
-                   (1.0-smoothstep(256.0,280.0,t));
+        // V8: keep the real 3D catalogue legible while it emerges.
+        // V4's bright near-uniform whiteout concealed galaxy birth for
+        // ~40 film seconds.  This slower, thinner blue-violet mist is
+        // LOCALIZED to correlated overdensities and never masks the sky.
+        // Strictly zero before 238 or after 285 scene seconds, so all
+        // earlier science chapters and the approved Solar System survive.
+        float mistArrival=smoothstep(238.0,262.0,t);
+        float mistClearing=1.0-smoothstep(263.0,285.0,t);
+        float haze=mistArrival*mistClearing;
         float clouds=fbm(ray*3.9+vec3(1.7,6.9,0.8))+
-                     0.23*fbm(ray*11.0+vec3(7.4,0.2,3.7));
-        float cloudy=0.55+0.65*smoothstep(0.27,0.73,clouds);
-        radiance+=transmit*vec3(0.45,0.48,0.53)*haze*cloudy;
-        radiance+=transmit*lateFirstLight(origin,ray,t)*0.28;
+                     0.18*fbm(ray*10.8+vec3(7.4,0.2,3.7));
+        float separate=smoothstep(0.42,0.78,clouds);
+        float striation=fbm(ray*18.0+vec3(1.3,2.7,8.1));
+        float localized=(0.085+0.83*separate)*
+                        (0.55+0.45*smoothstep(0.34,0.74,striation));
+        vec3 primordialDust=vec3(0.19,0.26,0.40);
+        radiance+=transmit*primordialDust*haze*localized;
+        // First stellar knots remain spatially anchored to the same
+        // collapsing overdensities later used by the 3D galaxy catalogue.
+        radiance+=transmit*lateFirstLight(origin,ray,t)*0.40;
     }
     return max(radiance,vec3(0.0));
 }
