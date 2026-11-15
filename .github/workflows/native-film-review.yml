@@ -1,13 +1,9 @@
 name: Complete native review film
 on:
+  # One-time explicit PR-file edit triggers this bounded review render.
+  # Subsequent code commits do not relaunch a 9000-frame job automatically.
   pull_request:
     paths:
-      - 'src/**'
-      - 'include/**'
-      - 'shaders/**'
-      - 'scripts/**'
-      - 'tests/**'
-      - 'CMakeLists.txt'
       - '.github/workflows/native-film-review.yml'
   workflow_dispatch:
 permissions:
@@ -17,11 +13,11 @@ concurrency:
   cancel-in-progress: true
 jobs:
   review-film:
-    # Expensive full 9000-frame render must be deliberately requested.
-    # Pull requests use the small, dedicated scene-preview workflow instead.
-    if: github.event_name == 'workflow_dispatch'
+    # One specifically authorized 300-second review on the user's NASA
+    # looktest PR; further runs require workflow_dispatch approval.
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'feature/nasa2007-cinematic-looktest-v1')
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 50
     env:
       LIBGL_ALWAYS_SOFTWARE: '1'
       GALLIUM_DRIVER: llvmpipe
@@ -56,7 +52,7 @@ jobs:
           mkdir -p output/film_evidence
           git rev-parse HEAD > output/film_evidence/source_commit.txt
           # Explicitly authorized review: 640x360/30fps/9000 frames, never 4K.
-          timeout --signal=TERM --kill-after=20s 28m xvfb-run -a -s '-screen 0 1280x720x24' python3 scripts/render_film.py --binary build/bigbang --output-dir output/full_review --width 640 --height 360 --fps 30 --chunk-frames 300 --crf 16 2>&1 | tee output/film_evidence/full_review.log
+          timeout --signal=TERM --kill-after=20s 38m xvfb-run -a -s '-screen 0 1280x720x24' python3 scripts/render_film.py --binary build/bigbang --output-dir output/full_review --width 640 --height 360 --fps 30 --chunk-frames 300 --crf 16 2>&1 | tee output/film_evidence/full_review.log
           ffprobe -v error -count_frames -show_entries format=duration,size:stream=codec_name,width,height,avg_frame_rate,nb_read_frames -of json output/full_review/film.mp4 > output/film_evidence/video_metadata.json
       - name: Upload film, checkpoints, actual PNG regression and logs
         if: always()
