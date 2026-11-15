@@ -13,81 +13,94 @@ vec3 lateGalaxyCenter(int index) {
     return vec3(7.1, 16.0, -1.8);
 }
 
-// Integrate a finite, tilted stellar / dust distribution in its own 3D
-// coordinate system. Eight samples concentrate work inside the galaxy instead
-// of undersampling thin discs with the much longer neutral-gas ray march.
-// The inclination, depth, bulge, broad uneven arms and dust attenuation are
-// evaluated in world space; this is not a screen-aligned galaxy sprite.
+// Cinematic M4 galaxy morphology pass. These finite, inclined, geometrically
+// thin gas/star discs replace the earlier uniformly glowing ellipsoids. All
+// shading is computed in world-space at the current timestamp, never from a
+// billboard, still image or cached sequence. The structures are artistic
+// cosmological interpretations, not N-body galaxy simulations.
+//
+// A ray intersects a compact oriented ellipsoid, then receives 18 stratified
+// volume samples. Ellipsoid Z is only three disc scale heights (formerly five)
+// and a separate small central bulge is added. Narrow, broken density-wave
+// arms, dust absorption and diffuse older stars yield a recognisable galaxy
+// silhouette without neon outlines or repeated two-dimensional spiral icons.
 vec3 lateGalaxy(vec3 origin, vec3 ray, float t, int index,
                 out float obscuration) {
-    float fi = float(index);
-    vec3 center = lateGalaxyCenter(index);
-    vec3 normal = normalize(index == 0 ? vec3(0.16, -0.48, 0.86) :
-                            (index == 1 ? vec3(-0.52, -0.35, 0.78) :
-                                          vec3(0.36, -0.76, 0.54)));
-    vec3 axisX = normalize(cross(vec3(0.0,0.0,1.0), normal));
-    vec3 axisY = cross(normal, axisX);
-    vec3 rel = origin-center;
-    vec3 o = vec3(dot(rel,axisX),dot(rel,axisY),dot(rel,normal));
-    vec3 d = vec3(dot(ray,axisX),dot(ray,axisY),dot(ray,normal));
-    float development = smoothstep(252.0+fi*3.0, 298.0, t);
-    float firstCluster = smoothstep(243.0+fi*4.0, 261.0+fi*3.0, t);
-    float radius = mix(1.65, index == 0 ? 4.5 : 2.65, development);
-    float height = mix(0.64,0.22,development);
-    // Closest approach to the ellipsoid bounds a compact integration range.
-    vec3 scale = vec3(radius*1.12,radius*1.12,height*5.0);
-    vec3 so = o/scale, sd = d/scale;
-    float a = dot(sd,sd);
-    float b = dot(so,sd);
-    float discriminant = b*b-a*(dot(so,so)-1.0);
-    obscuration = 0.0;
-    if (discriminant <= 0.0 || firstCluster < 0.0001) return vec3(0.0);
-    float root = sqrt(discriminant);
-    float entry = max(0.0,(-b-root)/a);
-    float leave = (-b+root)/a;
-    if (leave <= entry) return vec3(0.0);
-    float stepSize = (leave-entry)/8.0;
-    float transmittance = 1.0;
-    vec3 result = vec3(0.0);
-    for (int j=0; j<8; ++j) {
-        vec3 q = o+d*(entry+(float(j)+0.5)*stepSize);
-        float r = length(q.xy);
-        float rn = r/radius;
-        float theta = atan(q.y,q.x);
-        float turn = 2.0*theta - 3.4*log(rn+0.12) -
-                     0.030*(t-240.0) + fi*2.3;
-        float irregularity = valueNoise(q*vec3(1.7,1.7,3.0)+fi*9.3);
-        float mottling = valueNoise(q*vec3(5.8,5.8,7.0)+vec3(fi*17.0,4.2,1.8));
-        float boundary = smoothstep(0.0,0.23,1.0-dot(q/scale,q/scale));
-        // Initially amorphous clusters acquire a rotationally supported disc
-        // gradually. The arms remain a broad density enhancement with broken
-        // star-forming regions, rather than repeated bright spiral outlines.
-        float arm = pow(0.5+0.5*cos(turn+0.55*irregularity),4.0);
-        arm *= smoothstep(0.12,0.35,rn)*(1.0-smoothstep(0.68,1.0,rn));
-        float vertical = exp(-abs(q.z)/height);
-        float radial = exp(-2.8*rn)*(1.0-smoothstep(0.76,1.12,rn));
-        float disc = vertical*radial;
-        float bulgeRadius = length(q*vec3(1.0,1.0,1.65));
-        float bulge = exp(-bulgeRadius/(0.18*radius));
-        float clumps = smoothstep(0.42,0.76,irregularity)*
-                       smoothstep(0.24,0.74,mottling);
-        float stars = disc*mix(0.52,0.17,development);
-        stars += development*disc*(2.8*arm*(0.18+1.5*clumps)+0.08*clumps);
-        float young = development*disc*arm*clumps;
-        float dust = disc*(0.35+2.8*arm)*(0.18+1.4*irregularity)*development;
-        float alpha = 1.0-exp(-dust*stepSize*2.3);
-        vec3 oldStars = mix(vec3(0.79,0.72,0.60),
-                           vec3(0.69,0.75,0.80),development*0.32);
-        vec3 emission = oldStars*(stars*0.65+bulge*0.30) +
-                        vec3(0.62,0.71,0.80)*young*1.0;
-        emission *= boundary;
-        // Sub-resolution stellar granularity is deterministic in 3D; its
-        // contrast stays low to avoid swimming, glitter and neon star lanes.
-        emission *= 0.62+0.76*mottling;
-        result += transmittance*emission*stepSize*firstCluster;
-        transmittance *= 1.0-alpha;
+    float fi=float(index);
+    vec3 center=lateGalaxyCenter(index);
+    vec3 normal=normalize(index==0 ? vec3(0.16,-0.48,0.86) :
+                          (index==1 ? vec3(-0.52,-0.35,0.78) :
+                                      vec3(0.36,-0.76,0.54)));
+    vec3 axisX=normalize(cross(vec3(0.0,0.0,1.0),normal));
+    vec3 axisY=cross(normal,axisX);
+    vec3 rel=origin-center;
+    vec3 o=vec3(dot(rel,axisX),dot(rel,axisY),dot(rel,normal));
+    vec3 d=vec3(dot(ray,axisX),dot(ray,axisY),dot(ray,normal));
+
+    float youngCluster=smoothstep(243.0+fi*3.5,261.0+fi*2.6,t);
+    float mature=smoothstep(252.0+fi*3.0,296.0,t);
+    float radius=mix(1.42,index==0 ? 4.75 : 2.8,mature);
+    float thickness=mix(0.40,0.145,mature);
+    vec3 bounds=vec3(radius*1.06,radius*1.06,thickness*3.15);
+    vec3 so=o/bounds,sd=d/bounds;
+    float a=dot(sd,sd);
+    float b=dot(so,sd);
+    float delta=b*b-a*(dot(so,so)-1.0);
+    obscuration=0.0;
+    if(delta<=0.0 || youngCluster<=0.0001) return vec3(0.0);
+
+    float root=sqrt(delta);
+    float nearT=max(0.0,(-b-root)/a);
+    float farT=(-b+root)/a;
+    if(farT<=nearT) return vec3(0.0);
+
+    const int GALAXY_STEPS=18;
+    float ds=(farT-nearT)/float(GALAXY_STEPS);
+    float transmission=1.0;
+    vec3 result=vec3(0.0);
+    for(int i=0;i<GALAXY_STEPS;++i) {
+        vec3 q=o+d*(nearT+(float(i)+0.5)*ds);
+        float r=length(q.xy);
+        float rn=r/max(radius,0.01);
+        if(rn>=1.0) continue;
+        float azimuth=atan(q.y,q.x);
+        float lowNoise=valueNoise(vec3(q.xy*1.25,fi*7.4)+vec3(1.3,3.7,1.1));
+        float armNoise=valueNoise(q*vec3(3.0,3.0,4.0)+vec3(fi*11.7,1.0,3.4));
+        float fineNoise=valueNoise(q*vec3(8.7,8.7,12.0)+vec3(2.7,fi*13.7,1.6));
+        float warpedAngle=azimuth+0.26*(lowNoise-0.5);
+        float armPhase=2.0*warpedAngle-4.5*log(rn+0.16)-
+                       0.017*(t-240.0)+fi*2.1;
+        float wave=pow(0.5+0.5*cos(armPhase),8.0);
+        float broken=wave*smoothstep(0.14,0.36,rn)*
+                     (1.0-smoothstep(0.72,0.99,rn));
+        float knots=smoothstep(0.44,0.76,armNoise)*
+                    smoothstep(0.38,0.70,fineNoise);
+        float vertical=exp(-abs(q.z)/thickness);
+        float radial=exp(-pow(rn/0.63,1.45))*
+                     (1.0-smoothstep(0.86,1.0,rn));
+        float disc=vertical*radial;
+        float bulge=exp(-3.7*length(q/vec3(radius*0.30,
+                                              radius*0.30,
+                                              thickness*1.7)));
+        // Old stellar disc is wide and faint; the brighter blue-white lanes
+        // are localised to the two broken arms and compact knots.
+        float oldLum=disc*(0.20+0.10*lowNoise)*
+                      mix(0.75,0.42,mature);
+        float armsLum=mature*disc*broken*(0.55+1.65*knots);
+        float clumpLum=youngCluster*disc*knots*(0.06+0.20*broken);
+        vec3 source=vec3(0.76,0.69,0.57)*(oldLum+bulge*0.85)+
+                    vec3(0.50,0.68,0.96)*(armsLum+clumpLum);
+        source*=(0.80+0.40*fineNoise);
+        // Muted, irregular dust absorbs background starlight through the
+        // inclined disc. No orange or black hand-drawn spiral decorations.
+        float dust=disc*mature*(0.12+1.6*broken)*
+                   (0.35+1.1*lowNoise)*(0.60+0.55*armNoise);
+        float absorption=1.0-exp(-dust*ds*2.5);
+        result+=transmission*source*ds*youngCluster*1.75;
+        transmission*=1.0-absorption;
+        if(transmission<0.025) break;
     }
-    obscuration = 1.0-transmittance;
+    obscuration=1.0-transmission;
     return result;
 }
 
