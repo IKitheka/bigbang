@@ -114,9 +114,9 @@ public:
         if(vao_) glDeleteVertexArrays(1,&vao_);
     }
 
-    void draw(float t,const primordial::CameraPose& pose,int width,int height) {
+    void draw(float t,const primordial::CameraPose& pose,glm::vec3 lookAt,int width,int height) {
         if(t<240.0f) return;
-        const glm::vec3 forward=glm::normalize(-pose.position);
+        const glm::vec3 forward=glm::normalize(lookAt-pose.position);
         const glm::vec3 right=glm::normalize(
             glm::cross(forward,glm::vec3(0.0f,0.0f,1.0f)));
         const glm::vec3 up=glm::normalize(glm::cross(right,forward));
