@@ -1,0 +1,151 @@
+name: NASA-style native C++ cinematic looktest
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'shaders/**'
+      - 'tests/nasa2007_looktest.sh'
+      - '.github/workflows/nasa2007-native-looktest.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nasa-native-looktest-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-looktest:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      GALLIUM_DRIVER: llvmpipe
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install native software OpenGL toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential git cmake libglfw3-dev libglm-dev \
+            libgl1-mesa-dev libgl1-mesa-dri xvfb xauth ffmpeg
+      - name: Build candidate and protected 2026-11-15 baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+          mkdir -p work/baseline
+          git archive d5d19f12a091e08e8ea0177da447c9b90d02d117 | \
+            tar -x -C work/baseline
+          cmake -S work/baseline -B work/baseline/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DFETCHCONTENT_SOURCE_DIR_GLAD="$PWD/build/_deps/glad-src"
+          cmake --build work/baseline/build --parallel 2
+      - name: Native C++ stills, 18–22s protection and galaxy motion
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "commit=${GITHUB_SHA}" > output_nasa_provenance.txt
+          echo "source=NATIVE C++17 OpenGL 3.3 GLSL + HDR bloom" >> output_nasa_provenance.txt
+          echo "NASA 2007 SVS #10128 is a VISUAL REFERENCE ONLY" >> output_nasa_provenance.txt
+          timeout --signal=TERM --kill-after=15s 16m xvfb-run -a \
+            -s '-screen 0 1280x720x24' \
+            bash tests/nasa2007_looktest.sh 2>&1 | tee nasa_render_log.txt
+      - name: Encode 4s native looktest and make contact sheet
+        shell: bash
+        run: |
+          set -euo pipefail
+          O=output/nasa2007_native
+          ffmpeg -hide_banner -loglevel error -y \
+            -framerate 10 -i "$O/motion/frame_%04d.png" \
+            -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p \
+            -movflags +faststart "$O/nasa_style_276_280s.mp4"
+          ffprobe -v error -count_frames -select_streams v:0 \
+            -show_entries format=duration:stream=width,height,avg_frame_rate,nb_read_frames \
+            -of json "$O/nasa_style_276_280s.mp4" > "$O/video_metadata.json"
+          mkdir -p "$O/storyboard"
+          i=0
+          for t in 0 2 5 8 12 16 18 20 22 245 250 255 260 270 280 290 299; do
+            printf -v dst '%s/storyboard/frame_%02d.png' "$O" "$i"
+            cp "$O/candidate/t$t.png" "$dst"
+            i=$((i+1))
+          done
+          ffmpeg -hide_banner -loglevel error -y -framerate 1 \
+            -i "$O/storyboard/frame_%02d.png" \
+            -vf 'tile=5x4:margin=8:padding=5:color=black' \
+            -frames:v 1 "$O/native_17_frame_storyboard.png"
+          sha256sum "$O"/candidate/t*.png > "$O/native_stills_sha256.txt"
+          cmp "$O/motion/frame_0000.png" "$O/motion/frame_0040.png" \
+            && { echo 'No visible motion in native preview' >&2; exit 1; } \
+            || true
+          cat "$O/video_metadata.json"
+      - name: Encode two continuous C++ shots for actual motion review
+        shell: bash
+        run: |
+          set -euo pipefail
+          O=output/nasa2007_native
+          # One native C++/OpenGL context per shot. FFmpeg receives genuine
+          # RGB24 frames from C++ stdout; it NEVER generates scene images.
+          timeout --signal=TERM --kill-after=15s 7m \
+            xvfb-run -a -s '-screen 0 1280x720x24' \
+            bash -c 'set -euo pipefail
+              ./build/bigbang --start-frame 1 --end-frame 540 --fps 30 \
+                --width 480 --height 270 --raw-video - |
+              ffmpeg -hide_banner -loglevel error -nostdin -y \
+                -f rawvideo -pixel_format rgb24 -video_size 480x270 \
+                -framerate 30 -i pipe:0 -vf fps=10 \
+                -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p \
+                -movflags +faststart \
+                output/nasa2007_native/nasa_origin_0_18s.mp4' \
+            2>&1 | tee "$O/opening_batch.log"
+          timeout --signal=TERM --kill-after=15s 10m \
+            xvfb-run -a -s '-screen 0 1280x720x24' \
+            bash -c 'set -euo pipefail
+              ./build/bigbang --start-frame 7201 --end-frame 9000 --fps 30 \
+                --width 480 --height 270 --raw-video - |
+              ffmpeg -hide_banner -loglevel error -nostdin -y \
+                -f rawvideo -pixel_format rgb24 -video_size 480x270 \
+                -framerate 30 -i pipe:0 -vf fps=5 \
+                -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p \
+                -movflags +faststart \
+                output/nasa2007_native/nasa_galaxy_reveal_240_300s.mp4' \
+            2>&1 | tee "$O/galaxy_batch.log"
+          for file in "$O/nasa_origin_0_18s.mp4" "$O/nasa_galaxy_reveal_240_300s.mp4"; do
+            ffprobe -v error -count_frames -select_streams v:0 \
+              -show_entries format=duration:stream=width,height,avg_frame_rate,nb_read_frames \
+              -of json "$file"
+            ffmpeg -nostdin -hide_banner -v error -xerror -i "$file" -f null -
+          done
+          echo 'PASS: independently shaded by C++17/GLSL, encoded & decoded without errors'
+      - name: Upload video, real native PNGs and proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nasa2007-native-looktest-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            output/nasa2007_native/candidate/*.png
+            output/nasa2007_native/baseline/*.png
+            output/nasa2007_native/motion/frame_*.png
+            output/nasa2007_native/*.png
+            output/nasa2007_native/*.mp4
+            output/nasa2007_native/*.json
+            output/nasa2007_native/*.txt
+            output/nasa2007_native/*.log
+            nasa_render_log.txt
+            output_nasa_provenance.txt
+      - name: Manual cinematic approval required
+        if: always()
+        run: |
+          echo '### NASA 2007 looktest — visual approval still required' >> "$GITHUB_STEP_SUMMARY"
+          echo 'All scene pixels are independently computed by native C++/GLSL. The visual reference is not played back. Compare against SVS 10128 frames and keep the completed 300s source cut untouched.' >> "$GITHUB_STEP_SUMMARY"

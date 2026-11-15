@@ -232,16 +232,18 @@ vec3 lateEpochRadiance(vec3 origin, vec3 ray, float t) {
     float cmbVisibility = smoothstep(175.0,192.0,t)*(1.0-smoothstep(192.0,207.0,t));
     radiance += transmit*vec3(0.0008,0.00072,0.00061)*
                 (0.92+0.16*backgroundNoise)*cmbVisibility;
-    if (t > 240.0) {
-        vec3 galaxies = vec3(0.0);
-        float totalDust = 0.0;
-        for (int galaxy=0; galaxy<3; ++galaxy) {
-            float dust;
-            galaxies += lateGalaxy(origin,ray,t,galaxy,dust);
-            totalDust += dust;
-        }
-        radiance += transmit*(galaxies+lateFirstLight(origin,ray,t))*
-                    exp(-0.16*totalDust);
+    if (t > 238.0) {
+        // NASA 2007 transition: a milky, translucent cosmic medium clears
+        // to a deep-black field while myriad *separate* galaxies appear.
+        // The galaxy catalogue itself is drawn in native HDR by C++ later.
+        // Do NOT add back the prior three gigantic ellipsoidal fake galaxies.
+        float haze=smoothstep(239.0,251.0,t)*
+                   (1.0-smoothstep(256.0,280.0,t));
+        float clouds=fbm(ray*3.9+vec3(1.7,6.9,0.8))+
+                     0.23*fbm(ray*11.0+vec3(7.4,0.2,3.7));
+        float cloudy=0.55+0.65*smoothstep(0.27,0.73,clouds);
+        radiance+=transmit*vec3(0.45,0.48,0.53)*haze*cloudy;
+        radiance+=transmit*lateFirstLight(origin,ray,t)*0.28;
     }
     return max(radiance,vec3(0.0));
 }
