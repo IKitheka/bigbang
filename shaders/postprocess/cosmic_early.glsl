@@ -109,7 +109,7 @@ vec3 earlyEpochRadiance(vec3 origin, vec3 ray, float t) {
         float cloudVariance=0.24+0.62*smoothstep(0.25,0.74,coarse)+
                             0.14*fine;
         float mistAlpha=1.0-exp(-mistWeight*window*
-                           (0.055+0.17*cloudVariance)*EARLY_STEP_LENGTH);
+                           (0.035+0.105*cloudVariance)*EARLY_STEP_LENGTH);
         vec3 mistColor=mix(vec3(0.57,0.65,0.76),
                            vec3(1.04,0.98,0.91),
                            smoothstep(0.39,0.72,coarse));
