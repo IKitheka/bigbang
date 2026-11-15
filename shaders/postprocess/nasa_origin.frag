@@ -1,92 +1,100 @@
 #version 330 core
-// Original independently computed opening, art-directed against the user's
-// NASA SVS 10128 (2007) reference. A science-fiction-like violet-white
-// point and short luminous transition are deliberate *cinematic metaphors*:
-// no claim that a literal photographed singularity or explosion existed.
+// V5 candidate: original, NASA-2007-inspired cinematic ignition.
+// A visual metaphor for cosmological expansion, NOT an explosion into space.
+// Preserve exact original 18-22 s image by fading this overlay to alpha 0 at t>=18.
 in vec2 TexCoords;
 out vec4 FragColor;
-uniform float uTime,uAspect;
+uniform float uTime, uAspect;
 
-float h21(vec2 p) {
-    p=fract(p*vec2(123.34,345.45));
-    p+=dot(p,p+34.345);
+float hash21(vec2 p) {
+    p = fract(p * vec2(123.34,345.45));
+    p += dot(p,p+34.345);
     return fract(p.x*p.y);
 }
-float n2(vec2 p) {
+float noise2(vec2 p) {
     vec2 i=floor(p), f=fract(p);
     f=f*f*(3.0-2.0*f);
-    return mix(mix(h21(i),h21(i+vec2(1,0)),f.x),
-               mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x),f.y);
+    return mix(mix(hash21(i),hash21(i+vec2(1,0)),f.x),
+               mix(hash21(i+vec2(0,1)),hash21(i+vec2(1,1)),f.x),f.y);
 }
-float fm2(vec2 p) {
-    return 0.56*n2(p)+0.28*n2(p*2.07+9.7)+
-           0.12*n2(p*4.13-14.2)+0.04*n2(p*8.29+5.1);
+float fbm2(vec2 p) {
+    return .54*noise2(p)+.27*noise2(p*2.03+13.8)+
+           .13*noise2(p*4.11-4.7)+.06*noise2(p*8.23+23.7);
 }
+float ss(float a,float b,float x) { return smoothstep(a,b,x); }
 
 void main() {
     float t=max(0.0,uTime);
-    vec2 uv=TexCoords*2.0-vec2(1.0);
+    vec2 uv=TexCoords*2.0-1.0;
     uv.x*=uAspect;
-    float r=length(uv);
-    float theta=atan(uv.y,uv.x);
+    // Gentle cinematic push without moving the originating world-space point.
+    float r=length(uv), ang=atan(uv.y,uv.x);
+    float build=ss(0.0,3.8,t);
+    vec3 light=vec3(0.0);
 
-    // 0–3s: very small violet-white point on black, with a soft optical halo.
-    float build=smoothstep(0.0,3.3,t);
-    float core=exp(-r*r/(0.000045+0.00042*build))*(1.4+3.5*build);
-    float halo=exp(-12.0*r)*(0.10+0.7*build);
-    vec3 light=vec3(0.43,0.12,0.70)*halo+
-               vec3(1.35,0.92,1.80)*core;
+    // A legible small seed against pure black for the opening beats.
+    float origin=exp(-r*r/(0.000030+0.00028*build));
+    light+=origin*vec3(1.42,1.08,1.90)*(1.2+2.65*build);
+    light+=exp(-8.5*r)*vec3(0.31,0.11,0.62)*(0.18+0.85*build);
 
-    // 3–7s: eight diffraction-style lavender-white spikes bloom outward.
-    // Optical spikes are stylization, not literal jets into empty space.
-    float burst=smoothstep(2.2,4.2,t)*
-                (1.0-smoothstep(6.5,8.1,t));
-    float spikes=pow(abs(cos(theta*4.0+0.10)),27.0)*
-                 exp(-r*5.1)*smoothstep(0.004,0.065,r);
-    float rays=spikes*burst*1.85;
-    light+=vec3(0.67,0.47,0.93)*rays;
-    light+=vec3(0.55,0.28,0.81)*
-           exp(-3.7*r)*burst*0.23;
+    // Asymmetric optical rays during ignition. The original flare stays
+    // on-screen, but the pure geometric wheel is broken up with turbulence.
+    float ignition=ss(2.5,4.15,t)*(1.0-ss(8.5,10.5,t));
+    float distort=fbm2(vec2(ang*3.2,t*0.11))-0.5;
+    float rayPattern=pow(abs(cos(ang*4.0+distort*0.23)),36.0);
+    float rays=rayPattern*exp(-3.35*r)*ss(.015,.085,r)*ignition;
+    light+=vec3(.94,.66,1.42)*rays*1.60;
 
-    // A coherent expanding, finely corrugated violet shock/heat front
-    // strengthens the NASA-inspired ignition without substituting a simple
-    // uniform orange explosion. It expands in the *visualization*, not
-    // physically through a pre-existing exterior space.
-    float eruption=smoothstep(3.2,4.5,t)*
-                   (1.0-smoothstep(8.5,10.7,t));
-    float expansion=smoothstep(3.4,8.1,t);
-    float ripple=fm2(vec2(theta*2.3,t*0.19))-.5;
-    float shellR=0.055+0.62*expansion+0.046*ripple;
-    float shellDiff=(r-shellR)*22.0;
-    float shell=exp(-shellDiff*shellDiff);
-    float filaments=0.48+0.52*pow(abs(sin(theta*9.0+
-                                               t*0.67+6.2*ripple)),2.0);
-    light+=vec3(0.72,0.40,1.17)*shell*eruption*filaments*0.86;
-    // Soft angular ejecta in original HDR; glow/bloom will pick out just
-    // the strongest parts of the halo rather than whitening the entire sky.
-    float corona=exp(-r*3.8)*(0.60+0.40*sin(theta*6.0+t*0.26));
-    light+=vec3(0.36,0.13,0.70)*corona*eruption*0.33;
+    // A single rapidly growing, irregular energy/radiation front. The
+    // low-frequency angular displacement makes this a non-circular bloom;
+    // fine density variations create coherent folds, not disconnected rings.
+    float swell=ss(3.2,10.2,t);
+    float shellR=.04+1.20*swell;
+    float angleWarp=fbm2(vec2(ang*2.8+8.4,t*.105))-0.5;
+    float radWarp=fbm2(uv*3.4+vec2(t*.045,-t*.036))-0.5;
+    float contour=shellR*(0.77+0.40*(angleWarp+.5))+0.075*radWarp;
+    float thick=mix(.055,.29,swell);
+    float dd=(r-contour)/max(thick,.001);
+    float shell=exp(-dd*dd*1.70);
+    float contourDetail=fbm2(vec2(ang*7.0+r*1.8,t*.17-r*2.4));
+    float fissure=ss(.29,.73,contourDetail);
+    float frontGate=ss(3.20,4.1,t)*(1.0-ss(10.8,13.0,t));
+    vec3 shellCol=mix(vec3(.48,.14,.84),vec3(1.18,.64,1.48),fissure);
+    light+=shellCol*shell*frontGate*(0.28+1.25*fissure);
 
-    // A short purposeful high-key transition, as actually present in NASA's
-    // chosen reference around 2.7s of its 14s film. Limit it temporally.
-    float flash=exp(-pow(abs((t-6.95)/0.82),4.0));
-    light+=vec3(1.34,1.39,1.53)*flash;
+    // Hot shredded interior. Swirling, multi-scale material is advected
+    // continuously to prevent temporal flicker at 30fps.
+    float inside=1.0-ss(contour-.18,contour+.15,r);
+    vec2 flow=uv*(2.55+.52*swell);
+    flow+=vec2(0.17*sin(uv.y*3.7+t*.20),0.13*cos(uv.x*3.1-t*.17));
+    float low=fbm2(flow+vec2(t*.038,-t*.027));
+    float hi=fbm2(uv*9.0+vec2(t*.075,-t*.060));
+    float ridges=ss(.36,.69,low+.14*(hi-.5));
+    float matter=inside*ss(3.8,5.3,t)*(1.0-ss(11.5,14.7,t));
+    vec3 iridescent=mix(vec3(.13,.07,.39),vec3(.70,.35,.87),ridges);
+    iridescent=mix(iridescent,vec3(1.06,.72,.89),pow(ridges,3.0)*.52);
+    light+=matter*iridescent*(.23+1.05*ridges);
 
-    // 8–16s: wide pale medium with soft 2D projected optical variations.
-    // This represents visual continuity with the later true volumetric
-    // transport scene, not a solved QGP or cosmological density field.
-    float cloudWeight=smoothstep(7.5,9.5,t)*
-                      (1.0-smoothstep(13.7,17.9,t));
-    vec2 drift=vec2(t*0.008,-t*0.004);
-    float broad=fm2(uv*3.3+drift+vec2(3.5,1.4));
-    float fine=fm2(uv*10.7+drift*2.0+vec2(6.8,-2.1));
-    float layers=0.35+0.70*smoothstep(0.27,0.78,broad)+
-                 0.10*(fine-0.5);
-    vec3 cloud=vec3(0.70,0.73,0.78)*layers*cloudWeight;
-    light+=cloud;
+    // Broader high-key expanding medium, but with distinct purple/cyan
+    // shadowed folds, leaving local negative space instead of grey whiteout.
+    float cloudGate=ss(6.25,9.0,t)*(1.0-ss(14.1,17.5,t));
+    vec2 drift=vec2(.023*t,-.016*t);
+    float broad=fbm2(uv*2.40+drift+vec2(7.4,3.2));
+    float medium=fbm2(uv*5.85+drift*.83+vec2(11.2,-2.7));
+    float micro=fbm2(uv*13.6+drift*1.60+vec2(-3.5,9.1));
+    float cloudDensity=ss(.34,.70,broad*.68+medium*.28+micro*.12);
+    float veil=ss(.22,.71,broad);
+    float cold=ss(.40,.70,medium);
+    vec3 cloudColor=mix(vec3(.095,.10,.22),vec3(.60,.65,.80),veil);
+    cloudColor=mix(cloudColor,vec3(.72,.52,.88),cold*.40);
+    light+=cloudColor*cloudDensity*cloudGate*1.25;
 
-    // Blend into the previously owner-liked true 3D primordial volume.
-    // Fully ZERO by 18 seconds so all 18–22s protected images match exactly.
-    float cover=1.0-smoothstep(14.5,18.0,t);
+    // Concentrated transient bloom; avoid frame-wide exposure pumping.
+    float flash=exp(-pow(abs((t-6.60)/.45),4.0));
+    light+=vec3(.95,.84,1.15)*exp(-2.7*r)*flash*1.7;
+
+    // Preserve the approved V4 native 18-22s handoff EXACTLY: after
+    // t=18 there is no V5 contribution. No other film epochs are changed.
+    float cover=1.0-ss(14.5,18.0,t);
     FragColor=vec4(max(light,vec3(0.0)),cover);
 }
