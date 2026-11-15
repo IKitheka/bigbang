@@ -44,3 +44,13 @@ Provide clickable: GitHub draft PR, latest scene-preview Actions run, downloadab
 ## Important operational distinction
 
 This chat works synchronously only; it cannot keep modifying GitHub in the background or transfer a live process into ChatGPT Work automatically. This handover file is persistent in the feature branch so the user's Work session can pick up at its next opportunity. If its prior workspace is unavailable, resume from PR #11 without restarting from main.
+
+## Verified initial scene-first results (latest snapshot)
+
+- Current latest commit: `8c86fc1eb73008f34b24fc78e053024a39300cc0` (check branch head for newer work).
+- [Native eight-scene workflow run #43695040181](https://github.com/IKitheka/bigbang/actions/runs/43695040181): **PASS**. [Artifact #14153283732](https://github.com/IKitheka/bigbang/actions/runs/43695040181/artifacts/14153283732) expires **2026-11-29**; includes 8 clips, 32 source PNGs, 16s reel, 8×4 storyboard, metrics, provenance. This is the exact artifact to open first when Work resumes.
+- [Protected opening run #43695040095](https://github.com/IKitheka/bigbang/actions/runs/43695040095), [native still regression #43695040103](https://github.com/IKitheka/bigbang/actions/runs/43695040103) and [47–55s transition #43695040092](https://github.com/IKitheka/bigbang/actions/runs/43695040092) all **PASS**. Expensive full review correctly **skipped**; don't confuse skipped with regression.
+- QGP: first look was whitewashed (>80% near-white at 65–85s), latest has zero near-white there and mean luma **0.312–0.343**. Real native images show desaturated amber clouds, with pronounced dark cavities; **still not a final cinematic look**. Scene #2 is ready for art direction iteration, not approved.
+- Galaxies: physically flatter ellipses, faint world-anchored stars and grain, but still too much like three isolated glowing ovals. Need visually legible dust lane, stellar disk and irregular arms + improved hero-camera framing. Scene #7 is still unapproved.
+- Nucleosynthesis, opaque plasma, recombination still mostly pale correlated-noise curls and were **not** visually redesigned in this initial PR. They are now the next required scene-specific art tasks alongside galaxies.
+- PR #11 conversation contains an exact independent native-C++ visual gate comment with metrics; consult it rather than inferring success from a green CI check.
