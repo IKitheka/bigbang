@@ -54,16 +54,21 @@ jobs:
           mkdir -p output/v8_native
           # Frame numbers are 1-indexed: t=(frame-1)/30.
           # 5701..6900 = EXACTLY 1200 contiguous native OpenGL frames.
+          # IMPORTANT: the raw RGB24 pipe must be INSIDE xvfb-run.
+          # Otherwise wrapper diagnostics can be forwarded to ffmpeg's stdin,
+          # rotating RGB channels and creating visible vertical tears.
           timeout --signal=TERM --kill-after=15s 23m \
-            xvfb-run -a -s '-screen 0 1024x768x24' \
+            xvfb-run -a -s '-screen 0 1024x768x24' bash -c '
+              set -euo pipefail
               ./build/bigbang --start-frame 5701 --end-frame 6900 \
-              --fps 30 --width 480 --height 270 --raw-video - \
-              2>output/v8_native/native_render.log |
-          ffmpeg -hide_banner -loglevel error -nostdin -y \
-            -f rawvideo -pixel_format rgb24 -video_size 480x270 \
-            -framerate 30 -i pipe:0 \
-            -c:v libx264 -preset veryfast -crf 19 -pix_fmt yuv420p \
-            -movflags +faststart output/v8_native/native_video_silent.mp4
+                --fps 30 --width 480 --height 270 --raw-video - \
+                2>output/v8_native/native_render.log |
+              ffmpeg -hide_banner -loglevel error -nostdin -y \
+                -f rawvideo -pixel_format rgb24 -video_size 480x270 \
+                -framerate 30 -i pipe:0 \
+                -c:v libx264 -preset veryfast -crf 19 -pix_fmt yuv420p \
+                -movflags +faststart output/v8_native/native_video_silent.mp4
+            '
       - name: Verify RGB24 video matches independent C++ stills
         shell: bash
         run: |
