@@ -19,6 +19,7 @@ enum class Epoch : std::uint8_t {
     RecombinationCmb,
     DarkAges,
     CosmicDawnGalaxies,
+    SolarSystem,
 };
 
 struct Chapter {
@@ -31,23 +32,25 @@ struct Chapter {
 
 constexpr int kFilmDurationSeconds = 300;
 
-constexpr std::array<Chapter, 8> kChapters{{
+constexpr std::array<Chapter, 9> kChapters{{
     {Epoch::AbstractOrigin, 0, 20, "abstract_origin",
-     "Speculative Planck-era fluctuation visual"},
+     "NASA-inspired purple ignition and expansive primordial origin metaphor"},
     {Epoch::Inflation, 20, 50, "inflation",
-     "Expanding spatial correlation scales"},
-    {Epoch::QuarkGluonPlasma, 50, 90, "quark_gluon_plasma",
-     "Dense early-universe radiation-coupled continuum"},
-    {Epoch::PrimordialNucleosynthesis, 90, 130, "nucleosynthesis",
-     "Primordial nuclear reactions, not toy atom diagrams"},
-    {Epoch::OpaquePlasma, 130, 170, "opaque_plasma",
-     "Optically thick photon-electron-baryon medium"},
-    {Epoch::RecombinationCmb, 170, 200, "recombination_cmb",
-     "Optical thinning and illustrative CMB perturbations"},
-    {Epoch::DarkAges, 200, 240, "dark_ages",
-     "Near-dark neutral gas and developing density structure"},
-    {Epoch::CosmicDawnGalaxies, 240, 300, "cosmic_dawn_galaxies",
-     "First luminous stars and evolving galaxies"},
+     "Growing primordial correlations and expansion"},
+    {Epoch::QuarkGluonPlasma, 50, 82, "quark_gluon_plasma",
+     "Hot turbulent early-universe continuum"},
+    {Epoch::PrimordialNucleosynthesis, 82, 116, "nucleosynthesis",
+     "Warm locally energetic early nuclear process metaphor"},
+    {Epoch::OpaquePlasma, 116, 149, "opaque_plasma",
+     "Luminous optically thick photon-electron-baryon medium"},
+    {Epoch::RecombinationCmb, 149, 176, "recombination_cmb",
+     "Radiation decoupling and increasing optical transparency"},
+    {Epoch::DarkAges, 176, 196, "dark_ages",
+     "Brief near-dark neutral gas and developing density structure"},
+    {Epoch::CosmicDawnGalaxies, 196, 260, "cosmic_dawn_galaxies",
+     "First luminous stars, dense galaxy field and evolving cosmic web"},
+    {Epoch::SolarSystem, 260, 300, "solar_system",
+     "Illustrative present-day Solar System with Sun and eight orbiting planets"}
 }};
 
 constexpr bool isWellFormed() {
