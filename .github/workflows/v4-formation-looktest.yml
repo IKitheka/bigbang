@@ -1,3 +1,4 @@
+# V4 reference looktest retry after GLSL symbol fix; source remains native
 name: V4 formation-to-planets native looktest
 
 on:
