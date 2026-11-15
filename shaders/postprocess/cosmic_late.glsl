@@ -74,15 +74,15 @@ vec3 lateGalaxy(vec3 origin, vec3 ray, float t, int index,
         float bulge = exp(-bulgeRadius/(0.18*radius));
         float clumps = smoothstep(0.42,0.76,irregularity)*
                        smoothstep(0.24,0.74,mottling);
-        float stars = disc*mix(0.52,0.17,development);
-        stars += development*disc*(2.8*arm*(0.18+1.5*clumps)+0.08*clumps);
+        float stars = disc*mix(0.52,0.065,development);
+        stars += development*disc*(5.8*arm*(0.12+1.9*clumps)+0.045*clumps);
         float young = development*disc*arm*clumps;
-        float dust = disc*(0.35+3.7*arm)*(0.18+1.4*irregularity)*development;
+        float dust = disc*(0.35+5.2*arm)*(0.18+1.4*irregularity)*development;
         float alpha = 1.0-exp(-dust*stepSize*2.3);
-        vec3 oldStars = mix(vec3(0.79,0.72,0.60),
+        vec3 oldStars = mix(vec3(0.93,0.70,0.46),
                            vec3(0.69,0.75,0.80),development*0.32);
-        vec3 emission = oldStars*(stars*0.55+bulge*0.24) +
-                        vec3(0.62,0.71,0.80)*young*1.0;
+        vec3 emission = oldStars*(stars*0.55+bulge*0.33) +
+                        vec3(0.36,0.62,1.03)*young*2.35;
         emission *= boundary;
         // Sub-resolution stellar granularity is deterministic in 3D; its
         // contrast stays low to avoid swimming, glitter and neon star lanes.
