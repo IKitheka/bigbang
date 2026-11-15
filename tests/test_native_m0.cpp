@@ -173,7 +173,15 @@ int main() {
     invalid({"bigbang","--start-frame","5","--end-frame","4","--raw-video","-"});
     invalid({"bigbang","--start-frame","1","--raw-video","-"});
     invalid({"bigbang","--start-frame","1","--end-frame","2","--raw-video","movie.mp4"});
-    invalid({"bigbang","--start-frame","1","--end-frame","2","--raw-video","-","--width","3840"});
+    {
+        const auto uhd = parse({"bigbang", "--start-frame", "1", "--end-frame", "9000",
+                                "--fps", "30", "--width", "3840", "--height", "2160",
+                                "--raw-video", "-"});
+        assert(uhd.batch && uhd.capture && uhd.width == 3840 && uhd.height == 2160);
+        assert(uhd.frame == 1 && uhd.endFrame == 9000 && uhd.timeSeconds == 0.0);
+    }
+    invalid({"bigbang","--start-frame","1","--end-frame","2","--raw-video","-","--width","3841"});
+    invalid({"bigbang","--start-frame","1","--end-frame","2","--raw-video","-","--height","2161"});
     invalid({"bigbang","--start-frame","1","--end-frame","2","--raw-video","-","--time","20"});
 
     invalid({"bigbang", "--fps", "24"});
