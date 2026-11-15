@@ -158,12 +158,12 @@ void main() {
             float broad = fbm(stretched*0.13+vec3(4.2,8.1,-1.8));
             float fold  = fbm(stretched*0.31+vec3(8.7,1.3,5.0));
             float fine  = valueNoise(stretched*1.07+vec3(3.1,-2.0,4.6));
-            float interface = exp(-165.0*(fold-0.56)*(fold-0.56));
+            float foldInterface = exp(-165.0*(fold-0.56)*(fold-0.56));
             float filaments = exp(-340.0*(fold-0.64)*(fold-0.64));
             float air = smoothstep(0.40,0.69,broad) *
                         (0.24+0.76*smoothstep(0.32,0.72,fine));
             float density = 0.07*air +
-                            (0.62+0.42*fine)*interface +
+                            (0.62+0.42*fine)*foldInterface +
                             0.27*filaments;
             float altitude = smoothstep(1.0,5.0,distanceAlongRay) *
                 (1.0-smoothstep(23.0,34.0,distanceAlongRay));
