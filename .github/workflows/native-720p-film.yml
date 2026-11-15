@@ -1,0 +1,185 @@
+name: Native 720p five-minute cinematic film
+
+on:
+  # Opt-in one-time render: later shader changes do not auto-launch.
+  pull_request:
+    paths:
+      - '.github/workflows/native-720p-film.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-720p-film-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  chapters:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'feature/nasa2007-fullfilm-middle-epochs-v2')
+    name: Render segment ${{ matrix.id }} frames ${{ matrix.first }}–${{ matrix.last }}
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        include:
+          - {id: '01', first: 1, last: 600}
+          - {id: '02', first: 601, last: 1050}
+          - {id: '03', first: 1051, last: 1500}
+          - {id: '04', first: 1501, last: 2700}
+          - {id: '05', first: 2701, last: 3900}
+          - {id: '06', first: 3901, last: 5100}
+          - {id: '07', first: 5101, last: 7200}
+          - {id: '08', first: 7201, last: 9000}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 52
+    env:
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      GALLIUM_DRIVER: llvmpipe
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Install native Mesa and codec dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y build-essential cmake git libglfw3-dev libglm-dev libgl1-mesa-dev libgl1-mesa-dri xvfb xauth ffmpeg
+      - name: Compile and test native C++17 renderer
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+      - name: Render 720p range with verified recoverable chunks
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output/segment_${{ matrix.id }} output/delivery
+          timeout --signal=TERM --kill-after=20s 46m \
+            xvfb-run -a -s '-screen 0 1600x900x24' \
+            python3 scripts/render_film.py --binary build/bigbang \
+              --output-dir output/segment_${{ matrix.id }} \
+              --first-frame ${{ matrix.first }} --end-frame ${{ matrix.last }} \
+              --width 1280 --height 720 --fps 30 \
+              --chunk-frames 300 --crf 16 --preset fast \
+              2>&1 | tee output/delivery/part_${{ matrix.id }}_log.txt
+          cp output/segment_${{ matrix.id }}/film.mp4 output/delivery/part_${{ matrix.id }}.mp4
+          cp output/segment_${{ matrix.id }}/checkpoint.json output/delivery/part_${{ matrix.id }}_checkpoint.json
+          cp output/segment_${{ matrix.id }}/manifest.json output/delivery/part_${{ matrix.id }}_manifest.json
+          sha256sum output/delivery/part_${{ matrix.id }}.mp4 > output/delivery/part_${{ matrix.id }}_sha256.txt
+      - name: Retain each completed segment and checkpoint
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-720p-part-${{ matrix.id }}-${{ github.run_id }}
+          retention-days: 25
+          if-no-files-found: warn
+          path: output/delivery/*
+
+  assemble:
+    name: Join and validate 9000 native C++ frames at 720p
+    needs: chapters
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ffmpeg
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-720p-part-*-${{ github.run_id }}
+          path: output/incoming
+          merge-multiple: true
+      - name: Validate each part, concatenate, then verify full decode
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output/final
+          python3 - <<'PY'
+          import json,subprocess,hashlib,pathlib
+          folder=pathlib.Path('output/incoming')
+          frames=[600,450,450,1200,1200,1200,2100,1800]
+          assert sum(frames)==9000
+          names=[]
+          provenance={'source_commit':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
+                      'resolution':[1280,720],'fps':30,'parts':[]}
+          for i,count in enumerate(frames,1):
+              p=folder/f'part_{i:02d}.mp4'
+              if not p.is_file(): raise SystemExit(f'Part missing: {p}')
+              v=json.loads(subprocess.check_output(['ffprobe','-v','error','-count_frames','-of','json',
+                '-show_entries','stream=codec_name,width,height,avg_frame_rate,nb_read_frames:format=duration',
+                str(p)],text=True,timeout=200))
+              s=v['streams'][0]
+              if not(s['codec_name']=='h264' and s['width']==1280 and s['height']==720
+                  and s['avg_frame_rate']=='30/1' and int(s['nb_read_frames'])==count):
+                  raise SystemExit(f'Bad segment {p}: {v}')
+              subprocess.run(['ffmpeg','-v','error','-xerror','-nostdin','-i',str(p),'-f','null','-'],check=True,timeout=300)
+              provenance['parts'].append({'file':str(p),'frames':count,
+                   'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+              names.append("file '"+p.resolve().as_posix()+"'\n")
+          pathlib.Path('output/final/concat.txt').write_text(''.join(names))
+          pathlib.Path('output/final/part_verification.json').write_text(json.dumps(provenance,indent=2))
+          PY
+          ffmpeg -nostdin -hide_banner -loglevel error -y \
+            -f concat -safe 0 -i output/final/concat.txt \
+            -an -c:v copy -movflags +faststart \
+            output/final/BigBang_300s_NASA_Style_720p.mp4
+          python3 - <<'PY'
+          import json,subprocess,hashlib,pathlib
+          path=pathlib.Path('output/final/BigBang_300s_NASA_Style_720p.mp4')
+          out=subprocess.check_output(['ffprobe','-v','error','-count_frames',
+              '-show_entries','stream=codec_name,width,height,avg_frame_rate,nb_read_frames:format=duration,size',
+              '-of','json',str(path)],text=True,timeout=300)
+          m=json.loads(out);s=m['streams'][0];length=float(m['format']['duration'])
+          if not(len(m['streams'])==1 and s['codec_name']=='h264' and
+             (s['width'],s['height'])==(1280,720) and s['avg_frame_rate']=='30/1'
+             and int(s['nb_read_frames'])==9000 and abs(length-300)<0.05):
+             raise SystemExit(f'Invalid complete MP4 {m}')
+          subprocess.run(['ffmpeg','-v','error','-xerror','-nostdin','-i',str(path),
+                          '-f','null','-'],check=True,timeout=900)
+          m['sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
+          m['full_decode_verified']=True
+          m['source']='Native C++ OpenGL GLSL, not NASA footage'
+          pathlib.Path('output/final/verification.json').write_text(json.dumps(m,indent=2)+'\n')
+          print('Verified full 300.000s, 9,000 frames, 1280x720 H264 and clean decode')
+          PY
+      - name: Extract 18 genuine final-film frames as storyboard
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output/final/stills
+          i=0
+          for sec in 2 7 15 22 35 55 75 95 115 135 155 175 195 215 235 250 270 295; do
+            printf -v dst 'output/final/stills/frame_%02d.png' "$i"
+            ffmpeg -hide_banner -loglevel error -y -ss "$sec" \
+              -i output/final/BigBang_300s_NASA_Style_720p.mp4 \
+              -frames:v 1 -vf scale=480:270 "$dst"
+            i=$((i+1))
+          done
+          ffmpeg -hide_banner -loglevel error -y -framerate 1 \
+            -i 'output/final/stills/frame_%02d.png' \
+            -vf 'tile=3x6:margin=6:padding=5:color=black' -frames:v 1 \
+            output/final/18_epoch_storyboard.png
+      - name: Deliver movie and checksum proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-720p-full-300s-${{ github.run_id }}
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            output/final/BigBang_300s_NASA_Style_720p.mp4
+            output/final/verification.json
+            output/final/part_verification.json
+            output/final/18_epoch_storyboard.png
+      - name: Report
+        if: always()
+        run: |
+          echo '### 720p five-minute C++ film' >> "$GITHUB_STEP_SUMMARY"
+          echo 'All 9,000 frames independently shaded with native C++/OpenGL/GLSL. NASA 2007 SVS #10128 is a visual reference only, not footage in the output.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'A successful job requires exact 30fps/300s/720p metadata, all 9000 frames, strict full decode and eight verified segments.' >> "$GITHUB_STEP_SUMMARY"
