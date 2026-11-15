@@ -47,7 +47,7 @@ for record in "${scenes[@]}"; do
         -c:v libx264 -preset fast -crf 18 -pix_fmt yuv420p \
         -movflags +faststart "$out/clips/${ix}_${label}.mp4" \
         2>"$out/logs/ffmpeg_${ix}.log"
-  printf "file '%s'\n" "${ix}_${label}.mp4" >> "$out/scene_reel_concat.txt"
+  printf "file 'clips/%s'\n" "${ix}_${label}.mp4" >> "$out/scene_reel_concat.txt"
   ffprobe -v error -show_entries format=duration \
     -of default=noprint_wrappers=1:nokey=1 \
     "$out/clips/${ix}_${label}.mp4" >"$out/logs/duration_${ix}.txt"
