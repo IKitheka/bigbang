@@ -268,7 +268,10 @@ vec3 lateEpochRadiance(vec3 origin, vec3 ray, float t) {
         radiance+=transmit*primordialDust*haze*localized;
         // First stellar knots remain spatially anchored to the same
         // collapsing overdensities later used by the 3D galaxy catalogue.
-        radiance+=transmit*lateFirstLight(origin,ray,t)*0.40;
+        // The extra dawn grade reaches exact zero by legacy 285s,
+        // leaving later galaxies and the approved solar finale unchanged.
+        float earlyBoost=0.12*(1.0-smoothstep(275.0,285.0,t));
+        radiance+=transmit*lateFirstLight(origin,ray,t)*(0.28+earlyBoost);
     }
     return max(radiance,vec3(0.0));
 }
