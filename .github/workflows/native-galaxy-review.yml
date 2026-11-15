@@ -1,0 +1,112 @@
+name: Cinematic galaxy visual gate
+
+on:
+  pull_request:
+    paths:
+      - 'shaders/**'
+      - 'src/**'
+      - 'include/**'
+      - 'tests/**'
+      - '.github/workflows/native-galaxy-review.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cinematic-galaxy-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare-native-galaxies:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      GALLIUM_DRIVER: llvmpipe
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Install native C++ Mesa and video tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential cmake git libglfw3-dev libglm-dev libgl1-mesa-dev \
+            libgl1-mesa-dri xvfb xauth ffmpeg
+      - name: Build candidate and frozen baseline
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+          mkdir -p work/reference output/galaxy_review/baseline output/galaxy_review/candidate
+          git archive 83f2c6850158eb20622ce3965deaa247adc2bb06 | tar -x -C work/reference
+          cmake -S work/reference -B work/reference/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DFETCHCONTENT_SOURCE_DIR_GLAD="$PWD/build/_deps/glad-src"
+          cmake --build work/reference/build --parallel 2
+      - name: Render C++ galaxy scene and opening protection checks
+        run: |
+          set -euo pipefail
+          mkdir -p output/galaxy_review
+          {
+            echo "candidate_commit=${GITHUB_SHA}"
+            echo "base_commit=83f2c6850158eb20622ce3965deaa247adc2bb06"
+            echo "engine=Native C++17 OpenGL3.3 GLSL Mesa llvmpipe"
+            echo "preview_only=640x360; not an astrophysical model"
+          } > output/galaxy_review/provenance.txt
+          timeout --signal=TERM --kill-after=15s 10m \
+            xvfb-run -a -s '-screen 0 1280x720x24' \
+            bash tests/render_galaxy_previews.sh \
+            2>&1 | tee output/galaxy_review/render.log
+      - name: Compare native stills, write review diagnostics
+        run: |
+          set -euo pipefail
+          python3 tests/compare_galaxy_previews.py output/galaxy_review \
+            2>&1 | tee output/galaxy_review/measurements.log
+          mkdir -p output/galaxy_review/contact
+          for j in $(seq 0 4); do
+            t=$((240 + 10*j))
+            if [ "$j" -eq 4 ]; then t=290; fi
+            cp "output/galaxy_review/baseline/t${t}.png" \
+               "output/galaxy_review/contact/old_${j}.png"
+            cp "output/galaxy_review/candidate/t${t}.png" \
+               "output/galaxy_review/contact/new_${j}.png"
+          done
+          ffmpeg -hide_banner -loglevel error -y -framerate 1 \
+            -i 'output/galaxy_review/contact/old_%d.png' -filter_complex 'tile=5x1:margin=4:padding=8:color=black' \
+            -frames:v 1 output/galaxy_review/baseline_sheet.png
+          ffmpeg -hide_banner -loglevel error -y -framerate 1 \
+            -i 'output/galaxy_review/contact/new_%d.png' -filter_complex 'tile=5x1:margin=4:padding=8:color=black' \
+            -frames:v 1 output/galaxy_review/candidate_sheet.png
+          ffmpeg -hide_banner -loglevel error -y \
+            -framerate 5 -i 'output/galaxy_review/motion/frame_%04d.png' \
+            -c:v libx264 -preset fast -crf 18 -pix_fmt yuv420p \
+            -movflags +faststart output/galaxy_review/cinematic_galaxies_270_274.mp4
+          ffprobe -v error -count_frames -show_entries stream=width,height,avg_frame_rate,nb_read_frames:format=duration \
+            -of json output/galaxy_review/cinematic_galaxies_270_274.mp4 \
+            > output/galaxy_review/motion_metadata.json
+      - name: Upload actual C++ render evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-galaxy-review-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            output/galaxy_review/*.png
+            output/galaxy_review/*.mp4
+            output/galaxy_review/*.json
+            output/galaxy_review/*.txt
+            output/galaxy_review/*.log
+            output/galaxy_review/baseline/*.png
+            output/galaxy_review/candidate/*.png
+            output/galaxy_review/motion/*.png
+      - name: Review required
+        if: always()
+        run: |
+          echo '### Galaxy artistic review' >> "$GITHUB_STEP_SUMMARY"
+          echo 'These are genuine native C++/GLSL snapshots. CI only checks engineering properties; inspect galaxies for recognizable discs, dust lanes, star scale and high-quality spatial depth.' >> "$GITHUB_STEP_SUMMARY"
