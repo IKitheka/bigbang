@@ -111,8 +111,8 @@ vec3 planetAlbedo(int id,vec3 n,float time) {
         vec3 tanColor=vec3(0.82,0.57,0.34);
         vec3 bright=vec3(0.97,0.86,0.69);
         vec3 a=mix(tanColor,bright,smoothstep(-0.60,0.72,bands));
-        float storm=exp(-pow((n.z-0.21)*6.0,2.0))*
-                    exp(-pow(atan(n.y,n.x)*2.0,2.0));
+        float storm=exp(-((n.z-0.21)*6.0)*((n.z-0.21)*6.0))*
+                    exp(-(atan(n.y,n.x)*2.0)*(atan(n.y,n.x)*2.0));
         return mix(a,vec3(0.76,0.28,0.17),0.68*storm);
     }
     if(id==5) { // Saturn — creamy bands, rings are separate geometry
