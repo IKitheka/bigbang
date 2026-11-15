@@ -118,6 +118,7 @@ int main(int argc,char** argv) {
         Shader primordial(root+"/shaders/postprocess/screen.vert",root+"/shaders/postprocess/primordial_volume.frag");
         Shader nasaOrigin(root+"/shaders/postprocess/screen.vert",root+"/shaders/postprocess/nasa_origin.frag");
         Shader solarSystem(root+"/shaders/postprocess/screen.vert",root+"/shaders/postprocess/solar_system.frag");
+        Shader galaxyBridge(root+"/shaders/postprocess/screen.vert",root+"/shaders/postprocess/galaxy_to_solar_bridge.frag");
         Shader evolution(root+"/shaders/postprocess/screen.vert",root+"/shaders/postprocess/cosmic_evolution.frag");
         cinematic::GalaxyCatalog deepField(root);
         int initialWidth=0,initialHeight=0;
@@ -176,6 +177,17 @@ int main(int argc,char** argv) {
                 if(sceneT>=240.0f)
                     deepField.draw(sceneT,cinematic::cameraAt(sceneT),
                                    cinematic::targetAt(sceneT),width,height);
+                // V9: short, optically thin fly-through of dusty molecular
+                // material leading from the distant galaxy field towards
+                // the protoplanetary chapter. This additive, bounded overlay
+                // never alters t>=260: the approved 40s finale is protected.
+                if(t>240.0f && t<260.0f) {
+                    glEnable(GL_BLEND);
+                    glBlendFunc(GL_SRC_ALPHA,GL_ONE);
+                    drawVolume(galaxyBridge,cinematic::cameraAt(sceneT),
+                               t,width,height,quad,cinematic::targetAt(sceneT));
+                    glDisable(GL_BLEND);
+                }
             }
             if(t>=259.0f) {
                 // Original 3D ray-sphere Sun, all eight orbiting planets,
