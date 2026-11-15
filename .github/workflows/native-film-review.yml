@@ -1,14 +1,7 @@
 name: Complete native review film
 on:
-  pull_request:
-    paths:
-      - 'src/**'
-      - 'include/**'
-      - 'shaders/**'
-      - 'scripts/**'
-      - 'tests/**'
-      - 'CMakeLists.txt'
-      - '.github/workflows/native-film-review.yml'
+  # Deliberate opt-in during cinematic visual iteration; a new PR must not
+  # automatically consume a full 9000-frame review render.
   workflow_dispatch:
 permissions:
   contents: read
