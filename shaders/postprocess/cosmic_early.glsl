@@ -42,11 +42,11 @@ vec3 earlyEpochRadiance(vec3 origin, vec3 ray, float t) {
             sin(p.x * 0.54 + epochTime * 0.026 + cos(p.y*0.31)));
         float plasmaCoarse = fbm(flow*0.34 + vec3(3.1,8.2,-2.4));
         float plasmaFine = valueNoise(flow*1.78 + vec3(2.5,4.8,epochTime*0.087));
-        float ribbon = exp(-155.0*pow(plasmaCoarse-0.565,2.0));
+        float ribbon = exp(-420.0*pow(plasmaCoarse-0.595,2.0));
         float vortex = smoothstep(0.46,0.74,plasmaFine);
         float cavities = smoothstep(0.54,0.73,plasmaCoarse);
         float hotEdge = ribbon*(0.38+1.5*vortex);
-        float plasmaDensity = 0.002 + 0.085*cavities + 0.62*hotEdge;
+        float plasmaDensity = 0.002 + 0.025*cavities + 0.56*hotEdge;
         // QGP has a broad hot medium, but emissive optical thickness must
         // retain depth and visible pockets of negative space.
         density = mix(density,plasmaDensity,qgp);
@@ -61,13 +61,13 @@ vec3 earlyEpochRadiance(vec3 origin, vec3 ray, float t) {
         // with turbulence following the same 3D mass distribution.
         // A few concentrated high-energy streaks provide actual local
         // structure instead of globally brightening the entire screen.
-        vec3 plasmaCool = vec3(0.055,0.13,0.21);
-        vec3 plasmaWarm = vec3(0.73,0.44,0.25);
-        vec3 plasmaHot = vec3(1.15,0.98,0.72);
+        vec3 plasmaCool = vec3(0.018,0.062,0.15);
+        vec3 plasmaWarm = vec3(0.71,0.30,0.12);
+        vec3 plasmaHot = vec3(1.02,0.80,0.52);
         vec3 plasmaTint = mix(plasmaCool,plasmaWarm,
                               smoothstep(0.35,0.78,plasmaCoarse));
-        vec3 plasmaSource = plasmaTint*(0.025+0.34*cavities);
-        plasmaSource += plasmaHot*(0.80*hotEdge + 0.06*vortex*hotEdge);
+        vec3 plasmaSource = plasmaTint*(0.015+0.22*cavities);
+        plasmaSource += plasmaHot*(1.18*hotEdge + 0.09*vortex*hotEdge);
         source = mix(source,plasmaSource,qgp);
         if (reactions > 0.001) {
             // Two counter-advecting fluctuations briefly exchange energy
