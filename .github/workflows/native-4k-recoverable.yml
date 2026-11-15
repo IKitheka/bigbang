@@ -52,7 +52,30 @@ jobs:
       - name: Install native dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y build-essential cmake git libglfw3-dev libglm-dev libgl1-mesa-dev libgl1-mesa-dri xvfb xauth ffmpeg mesa-utils
+          sudo apt-get install --no-install-recommends -y build-essential cmake git libglfw3-dev libglm-dev libgl1-mesa-dev libgl1-mesa-dri xvfb xauth ffmpeg mesa-utils python3-yaml
+      - name: Check production scripts and protect approved renderer content
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C delivery diff --exit-code "$SOURCE_COMMIT" HEAD -- src include shaders scripts/render_film.py scripts/create_original_score.py
+          python3 - <<'PY'
+          import ast, re, subprocess, yaml
+          from pathlib import Path
+          spec=yaml.safe_load(Path('delivery/.github/workflows/native-4k-recoverable.yml').read_text())
+          count=0
+          for job_name,job in spec['jobs'].items():
+              for i,step in enumerate(job.get('steps',[])):
+                  script=step.get('run','')
+                  if not script:
+                      continue
+                  shell_source=re.sub(r'\$\{\{.*?\}\}','CI_VALUE',script)
+                  subprocess.run(['bash','-n'],input=shell_source,text=True,check=True)
+                  for source in re.findall(r"python3 - <<'PY'\n(.*?)\nPY(?:\n|$)",script,re.S):
+                      ast.parse(source,filename=f'{job_name}/step-{i}')
+                      count+=1
+          assert count>=6,count
+          print(f'PASS: shell syntax and {count} embedded Python scripts; approved renderer content unchanged')
+          PY
       - name: Build once or recover the exact previous executable
         env:
           GH_TOKEN: ${{ github.token }}
@@ -344,5 +367,130 @@ jobs:
           path: |
             output/assembly.log
             output/final/*.json
+          if-no-files-found: warn
+          retention-days: 90
+
+
+  durable-screening-release:
+    needs: assemble
+    name: Publish technically verified screening archives and verify downloads
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: native-4k-screening-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install independent media decoder
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ffmpeg
+      - uses: actions/download-artifact@v4
+        with:
+          name: BigBang_NATIVE_UHD_Technical_Screening
+          path: output/release
+      - name: Publish screening release without claiming final submission acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, importlib.util, json, os, subprocess, zipfile
+          from pathlib import Path
+          def run(args, capture=False):
+              return subprocess.run(args,check=True,timeout=1800,stdout=subprocess.PIPE if capture else None,text=True).stdout
+          def sha(path):
+              h=hashlib.sha256()
+              with path.open('rb') as f:
+                  for b in iter(lambda:f.read(2**20),b''):
+                      h.update(b)
+              return h.hexdigest()
+          root=Path('output/release')
+          report=json.loads((root/'Validation_Report.json').read_text())
+          assert report['technical_validation_passed'] and report['coverage_complete'] and report['verified_frames']==9000
+          assert report['source_commit']==os.environ['SOURCE_COMMIT'] and report['full_film_accepted'] is False
+          files=sorted(p for p in root.iterdir() if p.is_file())
+          assert all(p.stat().st_size < 2*1024**3 for p in files), 'Asset exceeds GitHub Release size limit'
+          for p in files:
+              if p.suffix=='.zip':
+                  with zipfile.ZipFile(p) as z:
+                      assert z.testzip() is None,p
+          tag=os.environ['RELEASE_TAG']
+          repo=os.environ['GH_REPO']
+          url=f'https://github.com/{repo}/releases/tag/{tag}'
+          notes=Path('output/screening-notes.md')
+          body=('# Native UHD technical screening — submission incomplete\n\n'
+              'This release preserves the technically verified 300-second, 9,000-frame native 3840x2160 picture, its original stereo score, 1080p and easy-play derivatives, storyboard, source and validation evidence.\n\n'
+              'Full viewing/listening, subjective transition approval, and finished presentation/report exports remain pending. This is a technical screening prerelease, not final university-submission acceptance.\n\n'
+              f'Renderer commit: {os.environ["SOURCE_COMMIT"]}. Production run: https://github.com/{repo}/actions/runs/{os.environ["GITHUB_RUN_ID"]}.\n\n'
+              'Download and extract the Native_4K ZIP for the UHD movie, the 1080p or Easy_Play ZIP for other players, and Evidence/Source ZIPs for implementation and checks. Each screening archive includes checksums for its own contents.\n\n'
+              f'![Extracted storyboard](https://github.com/{repo}/releases/download/{tag}/Storyboard.jpg)\n')
+          notes.write_text(body)
+          existing=subprocess.run(['gh','release','view',tag,'--json','isPrerelease,assets'],stdout=subprocess.PIPE,text=True)
+          if existing.returncode:
+              run(['gh','release','create',tag,'--target',os.environ['SOURCE_COMMIT'],'--prerelease','--title','Big Bang native 4K technical screening — final submission pending','--notes-file',str(notes)])
+              available=set()
+          else:
+              state=json.loads(existing.stdout)
+              assert state['isPrerelease'], 'Existing release is not the expected screening prerelease'
+              available={a['name'] for a in state['assets']}
+          actual=run(['gh','api',f'repos/{repo}/commits/{tag}','--jq','.sha'],capture=True).strip()
+          assert actual==os.environ['SOURCE_COMMIT'],'Release tag points at a different renderer commit'
+          downloaded=Path('output/release-roundtrip')
+          downloaded.mkdir(parents=True,exist_ok=True)
+          hashes={p.name:sha(p) for p in files}
+          for p in files:
+              if p.name not in available:
+                  run(['gh','release','upload',tag,str(p)])
+              run(['gh','release','download',tag,'--pattern',p.name,'--dir',str(downloaded),'--clobber'])
+              assert sha(downloaded/p.name)==hashes[p.name],f'Release transport mismatch: {p.name}'
+              if p.suffix=='.zip':
+                  with zipfile.ZipFile(downloaded/p.name) as z:
+                      assert z.testzip() is None,p.name
+                      if 'BigBang/SHA256SUMS.txt' in z.namelist():
+                          for line in z.read('BigBang/SHA256SUMS.txt').decode().splitlines():
+                              expected,name=line.split('  ',1)
+                              h=hashlib.sha256()
+                              with z.open('BigBang/'+name) as f:
+                                  for b in iter(lambda:f.read(2**20),b''):
+                                      h.update(b)
+                              assert h.hexdigest()==expected,(p.name,name)
+          spec=importlib.util.spec_from_file_location('assembly','scripts/assemble_native_4k.py')
+          assembly=importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(assembly)
+          checked=[]
+          for archive,movie,size in [('BigBang_Native_4K.zip','BigBang_300s_NATIVE_4K30_Stereo.mp4',(3840,2160)),('BigBang_1080p.zip','BigBang_300s_1080p30_Stereo.mp4',(1920,1080)),('BigBang_Easy_Play.zip','BigBang_300s_Easy_Play_360p30_Stereo.mp4',(640,360))]:
+              with zipfile.ZipFile(downloaded/archive) as z:
+                  path=Path(z.extract('BigBang/'+movie,'output/downloaded-media'))
+              assembly.verify_av(path,size)
+              checked.append({'archive':archive,'movie':movie,'size':list(size),'frames':9000,'seconds':300,'stereo':True,'strict_decode_after_release_download':True})
+          verification={'release_url':url,'source_commit':os.environ['SOURCE_COMMIT'],'run_id':os.environ['GITHUB_RUN_ID'],'asset_sha256':hashes,'downloaded_media':checked,'all_asset_hashes_match':True,'archive_crc_and_internal_hashes_verified':True,'full_film_accepted':False,'complete_viewing_and_listening':'pending','presentation_and_report_exports':'pending'}
+          proof=Path('output/Release_Download_Verification.json')
+          proof.write_text(json.dumps(verification,indent=2)+'\n')
+          if proof.name not in available:
+              run(['gh','release','upload',tag,str(proof)])
+          else:
+              run(['gh','release','download',tag,'--pattern',proof.name,'--dir',str(downloaded),'--clobber'])
+              assert sha(downloaded/proof.name)==sha(proof),'Existing release verification differs'
+          run(['gh','release','download',tag,'--pattern',proof.name,'--dir',str(downloaded),'--clobber'])
+          assert sha(downloaded/proof.name)==sha(proof)
+          notes.write_text(body+'\nAll release assets were downloaded and compared by SHA-256. ZIP CRC/internal checksums and strict full decode of all three downloaded audiovisual editions passed. See Release_Download_Verification.json. Final audiovisual and submission acceptance remain pending.\n')
+          run(['gh','release','edit',tag,'--notes-file',str(notes)])
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
+              f.write(f'\n[Durable technical screening release]({url}) passed asset download/hash, ZIP and full audiovisual decode checks. Final submission remains incomplete.\n')
+          PY
+      - name: Preserve independent release validation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uhd-release-download-verification
+          path: |
+            output/Release_Download_Verification.json
+            output/screening-notes.md
           if-no-files-found: warn
           retention-days: 90
