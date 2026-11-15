@@ -50,7 +50,7 @@ void main() {
 
     // A short purposeful high-key transition, as actually present in NASA's
     // chosen reference around 2.7s of its 14s film. Limit it temporally.
-    float flash=exp(-pow((t-6.95)/0.82,4.0));
+    float flash=exp(-pow(abs((t-6.95)/0.82),4.0));
     light+=vec3(1.34,1.39,1.53)*flash;
 
     // 8–16s: wide pale medium with soft 2D projected optical variations.
