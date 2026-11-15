@@ -1,0 +1,110 @@
+name: Native volume optimization regression
+on:
+  push:
+    branches: [release/native-4k-university-final]
+    paths:
+      - .github/workflows/native-volume-regression.yml
+      - shaders/postprocess/primordial_volume.frag
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: native-volume-regression-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    env:
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      GALLIUM_DRIVER: llvmpipe
+      BASELINE: 93c7c1722eac1bd06b589dcb7c0d2c9576d012a8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install native build and inspection tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y build-essential cmake git libglfw3-dev libglm-dev libgl1-mesa-dev libgl1-mesa-dri mesa-utils xvfb xauth ffmpeg python3 python3-numpy
+      - name: Build and run existing regressions
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+          python3 -m unittest discover -s tests -p test_film_render.py -v
+          git diff --exit-code "$BASELINE" -- src shaders ':!shaders/postprocess/primordial_volume.frag'
+      - name: Record available rendering devices
+        run: |
+          mkdir -p output/volume-regression
+          if [ -d /dev/dri ]; then ls -l /dev/dri > output/volume-regression/devices.txt; else echo 'No /dev/dri devices' > output/volume-regression/devices.txt; fi
+          if command -v nvidia-smi >/dev/null 2>&1; then nvidia-smi -L >> output/volume-regression/devices.txt 2>&1 || true; else echo 'nvidia-smi unavailable' >> output/volume-regression/devices.txt; fi
+          env -u LIBGL_ALWAYS_SOFTWARE -u GALLIUM_DRIVER xvfb-run -a glxinfo -B > output/volume-regression/default-driver.txt 2>&1
+          xvfb-run -a ./build/bigbang --renderer-info > output/volume-regression/capture-driver.txt
+          cat output/volume-regression/devices.txt output/volume-regression/default-driver.txt output/volume-regression/capture-driver.txt
+      - name: Compare native pixels against the saved baseline
+        timeout-minutes: 13
+        run: |
+          xvfb-run -a -s '-screen 0 3840x2160x24' python3 -u - <<'PY'
+          import hashlib, json, os, pathlib, subprocess, time
+          import numpy as np
+          out = pathlib.Path('output/volume-regression')
+          shader = pathlib.Path('shaders/postprocess/primordial_volume.frag')
+          candidate = shader.read_bytes()
+          reference = subprocess.check_output(['git', 'show', os.environ['BASELINE'] + ':' + str(shader)])
+          head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          times = [4.5, 6, 12, 17.9666667, 18, 18.0333333, 22, 30, 42, 45, 48, 49.9666667, 50, 50.0333333, 54, 56, 210, 250, 260, 280, 292]
+          samples = [(t, 640, 360) for t in times] + [(6,3840,2160),(30,3840,2160),(50,3840,2160)]
+          report = {'baseline': os.environ['BASELINE'], 'candidate': head, 'comparisons': [], 'passed': False,
+                    'scope': 'Decoded RGB still comparisons; process timings include context setup, shader compilation, readback and PNG encoding. Not film motion acceptance.'}
+          summary = pathlib.Path(os.environ['GITHUB_STEP_SUMMARY'])
+          with summary.open('a') as f:
+              f.write('## Native volume regression\n\n| Time (s) | Dimensions | Identical RGB | Reference (s) | Candidate (s) | Max delta |\n|---|---|---|---|---|---|\n')
+          def capture(label, source, t, w, h, stem):
+              shader.write_bytes(source)
+              png = out / (stem + '-' + label + '.png')
+              started = time.monotonic()
+              with (out / (stem + '-' + label + '.log')).open('w') as log:
+                  subprocess.run(['./build/bigbang','--time',str(t),'--fps','30','--width',str(w),'--height',str(h),'--output',str(png)], stdout=log, stderr=subprocess.STDOUT, check=True, timeout=150)
+              elapsed = time.monotonic() - started
+              probe = json.loads(subprocess.check_output(['ffprobe','-v','error','-select_streams','v:0','-show_entries','stream=width,height','-of','json',str(png)]))['streams'][0]
+              if (probe['width'],probe['height']) != (w,h):
+                  raise RuntimeError('Incorrect native dimensions: ' + str(probe))
+              rgb = subprocess.check_output(['ffmpeg','-v','error','-xerror','-i',str(png),'-frames:v','1','-f','rawvideo','-pix_fmt','rgb24','-'])
+              if len(rgb) != w*h*3:
+                  raise RuntimeError('Incorrect decoded RGB byte count')
+              return rgb, elapsed, hashlib.sha256(rgb).hexdigest()
+          try:
+              for index, (t,w,h) in enumerate(samples):
+                  stem = str(index).zfill(2) + '-t' + str(t) + '-' + str(w) + 'x' + str(h)
+                  order = [('reference',reference),('candidate',candidate)]
+                  if index % 2: order.reverse()
+                  results = {label: capture(label,source,t,w,h,stem) for label,source in order}
+                  a,ta,ha = results['reference']
+                  b,tb,hb = results['candidate']
+                  equal = a == b
+                  delta = np.abs(np.frombuffer(a,dtype=np.uint8).astype(np.int16) - np.frombuffer(b,dtype=np.uint8).astype(np.int16))
+                  record = dict(time=t,width=w,height=h,identical=equal,reference_seconds=ta,candidate_seconds=tb,max_channel_delta=int(delta.max()),different_channels=int(np.count_nonzero(delta)),reference_rgb_sha256=ha,candidate_rgb_sha256=hb)
+                  report['comparisons'].append(record)
+                  (out/'comparison.json').write_text(json.dumps(report,indent=2)+'\n')
+                  print(json.dumps(record),flush=True)
+                  with summary.open('a') as f:
+                      f.write('| '+str(t)+' | '+str(w)+'x'+str(h)+' | '+str(equal)+' | '+format(ta,'.3f')+' | '+format(tb,'.3f')+' | '+str(record['max_channel_delta'])+' |\n')
+              report['passed'] = all(r['identical'] for r in report['comparisons'])
+              (out/'comparison.json').write_text(json.dumps(report,indent=2)+'\n')
+              if not report['passed']:
+                  raise RuntimeError('Native RGB differs from baseline; do not accept the optimization')
+          finally:
+              shader.write_bytes(candidate)
+          PY
+      - name: Ensure reference substitution was restored
+        if: always()
+        run: git diff --exit-code -- src shaders
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-volume-regression-evidence
+          path: output/volume-regression/
+          retention-days: 30
+          if-no-files-found: error
