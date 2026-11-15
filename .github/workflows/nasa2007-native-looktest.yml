@@ -36,7 +36,7 @@ jobs:
           sudo apt-get install --no-install-recommends -y \
             build-essential git cmake libglfw3-dev libglm-dev \
             libgl1-mesa-dev libgl1-mesa-dri xvfb xauth ffmpeg
-      - name: Build candidate and protected 2026-11-15 baseline
+      - name: Build V7 candidate and V5 parent for post-50s preservation
         shell: bash
         run: |
           set -euo pipefail
@@ -44,13 +44,13 @@ jobs:
           cmake --build build --parallel 2
           ctest --test-dir build --output-on-failure
           mkdir -p work/baseline
-          git archive d5d19f12a091e08e8ea0177da447c9b90d02d117 | \
+          git archive 869d54043af1d15ee3f43ed733f1b128b325187b | \
             tar -x -C work/baseline
           cmake -S work/baseline -B work/baseline/build \
             -DCMAKE_BUILD_TYPE=Release \
             -DFETCHCONTENT_SOURCE_DIR_GLAD="$PWD/build/_deps/glad-src"
           cmake --build work/baseline/build --parallel 2
-      - name: Native C++ stills, 18–22s protection and galaxy motion
+      - name: Native C++ stills, post-50s protection and galaxy motion
         shell: bash
         run: |
           set -euo pipefail
