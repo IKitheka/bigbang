@@ -138,6 +138,8 @@ float starLight(vec3 dir) {
     return star*exp(-175.0*d*d)*
            (0.38+1.42*hash21(grid+vec2(2.5,8.1)));
 }
+#include "protoplanetary.glsl"
+
 void main() {
     float t=clamp(uTime,260.0,299.999);
     float progress=clamp((t-260.0)/40.0,0.0,1.0);
@@ -146,10 +148,13 @@ void main() {
     vec3 wideCamera=vec3(10.0+8.0*dolly,-56.0+12.0*dolly,28.0-9.0*dolly);
     // Final 7 seconds: purposeful fly-in toward Earth, after an extended
     // wide shot showing all eight orbiting planets around the Sun.
-    float fly=smoothstep(0.79,0.99,progress);
-    vec3 closeCamera=earth+vec3(2.4,-8.9,4.2);
+    float fly=smoothstep(0.82,0.995,progress);
+    // End on a clearly visible globe rather than the previous tiny Earth.
+    // Easing starts late, giving the disc and entire eight-planet system
+    // plenty of screen time before the emotional final close-up.
+    vec3 closeCamera=earth+vec3(0.75,-2.6,1.4);
     vec3 camera=mix(wideCamera,closeCamera,fly);
-    vec3 target=mix(vec3(0.0),earth,fly*0.92);
+    vec3 target=mix(vec3(0.0),earth,fly*0.995);
     vec3 forward=normalize(target-camera);
     vec3 right=normalize(cross(forward,vec3(0.0,0.0,1.0)));
     vec3 up=normalize(cross(right,forward));
@@ -164,6 +169,9 @@ void main() {
     float nebula=fbm3(ray*9.0+vec3(11.0,3.0,1.7));
     color+=vec3(0.006,0.010,0.020)*
            pow(smoothstep(0.54,0.78,nebula),2.0);
+    // The source-linked conceptual change: let a real 3D molecular-cloud
+    // visualization precede an orbiting dust disc and protoplanets.
+    color+=v4NebularEnvelope(camera,ray,t);
 
     float closest=1.0e20;
     int object=-1;
@@ -175,7 +183,11 @@ void main() {
     }
     for(int i=0;i<8;++i) {
         vec3 p=orbitPosition(i,t);
-        float radius=planetBodyRadius(i);
+        float development=v4PlanetReveal(t,i);
+        // Growth affects true ray/sphere geometry, not a screen-scale icon.
+        // Embryos remain small, warm and dusty before the mature disc clears.
+        if(development<0.002) continue;
+        float radius=planetBodyRadius(i)*mix(0.17,1.0,development);
         float distance=sphereIntersect(camera,ray,p,radius);
         if(distance<closest) {
             closest=distance;object=i;objectCenter=p;objectRadius=radius;
@@ -188,13 +200,18 @@ void main() {
         if(object==8) {
             float granule=fbm3(surface*7.5+vec3(t*0.02));
             float hot=0.77+0.33*granule;
-            color=vec3(2.7,1.68,0.63)*hot;
-            color+=vec3(0.62,0.35,0.18)*max(0.0,n.z)*0.3;
+            float ignition=smoothstep(263.0,276.0,t);
+            vec3 protostar=vec3(0.61,0.30,0.19)*(0.70+0.50*granule);
+            vec3 mature=vec3(2.7,1.68,0.63)*hot+
+                        vec3(0.62,0.35,0.18)*max(0.0,n.z)*0.3;
+            color=mix(protostar,mature,ignition);
         } else {
             vec3 sunDir=normalize(-surface);
             float lambert=max(dot(n,sunDir),0.0);
             float day=0.05+0.95*pow(lambert,0.77);
             vec3 base=planetAlbedo(object,n,t);
+            float developed=v4PlanetReveal(t,object);
+            base=v4YoungPlanetColor(base,developed,n,t);
             color=base*day;
             // Tiny atmosphere scatter/rim on Earth and the ice giants.
             if(object==2 || object>=6) {
@@ -224,10 +241,17 @@ void main() {
                 float light=max(dot(ringNormal,normalize(-saturn)),0.07);
                 vec3 tint=mix(vec3(0.36,0.25,0.15),
                               vec3(0.84,0.71,0.46),strip);
-                color=mix(color,tint*(0.17+0.76*light),edge*0.9);
+                float ringsBorn=smoothstep(283.0,291.0,t);
+                color=mix(color,tint*(0.17+0.76*light),
+                          edge*0.9*ringsBorn);
             }
         }
     }
+
+    // Real perspective intersections with a rotating accretion disc in
+    // three depth layers. Dust cannot shine through an opaque foreground
+    // planet or Sun; it remains tied to the world, not the screen.
+    color+=v4ProtoplanetaryDisk(camera,ray,t,closest);
 
     // Sun's layered corona and warm lens glow, preserving deep negative
     // space. Glow does not pretend to depict actual sound in space.
@@ -236,7 +260,8 @@ void main() {
     float halo=exp(-rayDist*0.12)*0.075+
                exp(-rayDist*0.44)*0.17;
     float glowMask=(object==8) ? 0.0 : 1.0;
-    color+=vec3(1.0,0.40,0.10)*halo*glowMask;
+    float sunIgnition=smoothstep(263.0,276.0,t);
+    color+=vec3(1.0,0.40,0.10)*halo*glowMask*(0.18+0.82*sunIgnition);
 
     // User asked for the solar system at the very end. Crossfade from the
     // dense-galaxy sequence without abruptly replacing a beautiful shot.
