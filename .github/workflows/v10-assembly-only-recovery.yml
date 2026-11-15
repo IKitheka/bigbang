@@ -1,0 +1,79 @@
+name: V10 assembly-only recovery from proven native segments
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/assemble_v10_existing_artifacts.py'
+      - '.github/workflows/v10-assembly-only-recovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: v10-assembly-recovery
+  cancel-in-progress: true
+
+jobs:
+  master-recovery:
+    name: Assemble 9000 existing V10 native frames without re-rendering
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install deterministic soundtrack and original media verification
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ffmpeg python3-numpy
+      - name: Download the 12 completed source segments from original V10 run
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: IKitheka/bigbang
+          run-id: 43735984392
+          pattern: v10-native-part-*-43735984392
+          path: output/v10_recovered
+          merge-multiple: true
+      - name: Reassemble only, strictly validate original native data and score
+        shell: bash
+        env:
+          V10_ORIGINAL_SOURCE_SHA: 26bd6f0c713a0069ed1c7f323c406c0dd50ebc20
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/assemble_v10_review.py \
+            scripts/assemble_v10_existing_artifacts.py
+          python3 - <<'PY'
+          import sys
+          sys.path.insert(0, 'scripts')
+          import assemble_v10_existing_artifacts as fix
+          assert fix.review.SIZES == [600,900,960,1020,990,810,600,720,600,600,600,600]
+          assert sum(fix.review.SIZES) == 9000
+          print('Validated native manifest: 12 segments, 9000 frames')
+          PY
+          python3 scripts/assemble_v10_existing_artifacts.py \
+            --incoming output/v10_recovered \
+            --out output/v10_final \
+            --expected-sha "$V10_ORIGINAL_SOURCE_SHA"
+      - name: Publish downloadable GitHub ZIP (video, storyboard and proof)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BigBang_V10_Complete_5min_270p_30fps_Original_Stereo
+          retention-days: 30
+          if-no-files-found: warn
+          compression-level: 6
+          path: |
+            output/v10_final/BigBang_V10_Integrated_5min_Native_480p30_With_Sound.mp4
+            output/v10_final/V10_24_Frame_Storyboard.jpg
+            output/v10_final/V10_Validation_and_Transition_Audit.json
+            output/v10_final/README_WATCH.txt
+      - name: Explain provenance and resolution
+        if: always()
+        run: |
+          echo "### V10: Assembly-only recovery" >> "$GITHUB_STEP_SUMMARY"
+          echo "Reuses all **12 native C++/OpenGL segments and their exact source SHA** from successful source jobs in V10 run 43735984392. Does not re-render or substitute external media." >> "$GITHUB_STEP_SUMMARY"
+          echo "This is a screening cut at **480×270, 30fps**, with ORIGINAL stereo score; not final 1080p." >> "$GITHUB_STEP_SUMMARY"
