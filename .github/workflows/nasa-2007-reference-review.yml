@@ -19,6 +19,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Install video sampling tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ffmpeg
       - name: Download exact NASA Goddard 2007 source for reference only
         shell: bash
         run: |
