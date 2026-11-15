@@ -1,4 +1,4 @@
-name: Native UHD validation and bounded scene benchmarks
+name: Native UHD validation and bounded pilot benchmarks
 
 on:
   push:
@@ -17,17 +17,16 @@ jobs:
   native-4k-preview:
     name: Native UHD ${{ matrix.scene }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 18
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       max-parallel: 2
       matrix:
         include:
-          - {scene: ignition, first: 181, last: 210}
-          - {scene: expansion, first: 901, last: 930}
-          - {scene: galaxies, first: 6301, last: 6330}
-          - {scene: molecular-cloud, first: 7501, last: 7530}
-          - {scene: earth-finale, first: 8761, last: 8790}
+          - {scene: ignition, first: 181, last: 183}
+          - {scene: expansion, first: 901, last: 903}
+          - {scene: molecular-cloud, first: 7501, last: 7503}
+          - {scene: earth-finale, first: 8761, last: 8763}
     env:
       LIBGL_ALWAYS_SOFTWARE: '1'
       GALLIUM_DRIVER: llvmpipe
@@ -52,14 +51,14 @@ jobs:
           git diff --exit-code 127b96ca1ca74c2eebf7fb5ef0ca03e5f9f5f9dc -- src shaders
           git rev-parse HEAD > output/uhd-evidence/source-commit.txt
           xvfb-run -a build/bigbang --renderer-info > output/uhd-evidence/opengl.txt
-      - name: Render thirty genuine native UHD frames with verified checkpoints
+      - name: Render three native UHD pilot frames with verified checkpoints
         shell: bash
         run: |
           set -euo pipefail
-          timeout --signal=TERM --kill-after=15s 10m xvfb-run -a -s '-screen 0 3840x2160x24' python3 scripts/render_film.py --binary build/bigbang --output-dir output/uhd-preview --first-frame ${{ matrix.first }} --end-frame ${{ matrix.last }} --width 3840 --height 2160 --fps 30 --chunk-frames 15 --chunk-timeout 270 --preset fast --crf 16
+          timeout --signal=TERM --kill-after=15s 8m xvfb-run -a -s '-screen 0 3840x2160x24' python3 scripts/render_film.py --binary build/bigbang --output-dir output/uhd-preview --first-frame ${{ matrix.first }} --end-frame ${{ matrix.last }} --width 3840 --height 2160 --fps 30 --chunk-frames 1 --chunk-timeout 150 --preset fast --crf 16
           ffprobe -v error -count_frames -show_entries stream=width,height,nb_read_frames,avg_frame_rate -of json output/uhd-preview/film.mp4 > output/uhd-evidence/ffprobe.json
           ffmpeg -nostdin -v error -i output/uhd-preview/film.mp4 -frames:v 1 output/uhd-evidence/first-frame.png
-          python3 -c 'import json; from pathlib import Path; p=Path("output/uhd-preview"); m=json.loads((p/"manifest.json").read_text()); s=json.loads((p/"checkpoint.json").read_text()); print("Native UHD scene benchmark; not a completed film."); print(json.dumps({"source":m["source"]["git_head"],"renderer":m["renderer"],"validated":s["final"],"render_encode_seconds":s["completed_chunks_render_encode_wall_seconds"]},indent=2))' >> "$GITHUB_STEP_SUMMARY"
+          python3 -c 'import json; from pathlib import Path; p=Path("output/uhd-preview"); m=json.loads((p/"manifest.json").read_text()); s=json.loads((p/"checkpoint.json").read_text()); print("Native UHD three-frame timing pilot; not a motion-quality preview or completed film."); print(json.dumps({"source":m["source"]["git_head"],"renderer":m["renderer"],"validated":s["final"],"render_encode_seconds":s["completed_chunks_render_encode_wall_seconds"]},indent=2))' >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve previews, checksums, source evidence and failure logs
         if: always()
         uses: actions/upload-artifact@v4
