@@ -1,0 +1,203 @@
+name: Recoverable native UHD production
+
+on:
+  push:
+    branches: [release/native-4k-university-final]
+    paths: [.github/workflows/native-4k-recoverable.yml]
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: Six continuous pilots or all 100 production parts
+        type: choice
+        options: [benchmark, production]
+        default: benchmark
+      recovery_run:
+        description: Prior workflow run whose exact binary and parts should be reused
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: recoverable-native-uhd-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SOURCE_COMMIT: 461ed7c8f3b93428b2ed869e9238963cdef29f5e
+  SCOPE: ${{ inputs.scope || 'benchmark' }}
+  RECOVERY_RUN: ${{ inputs.recovery_run || '' }}
+  LIBGL_ALWAYS_SOFTWARE: '1'
+  GALLIUM_DRIVER: llvmpipe
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+          path: native
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y build-essential cmake git libglfw3-dev libglm-dev libgl1-mesa-dev libgl1-mesa-dri xvfb xauth ffmpeg mesa-utils
+      - name: Build once or recover the exact previous executable
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output/build
+          if [[ -n "$RECOVERY_RUN" ]]; then
+            [[ "$RECOVERY_RUN" =~ ^[0-9]+$ ]]
+            gh run download "$RECOVERY_RUN" --name uhd-renderer --dir output/build
+            (cd output/build && sha256sum --check renderer.tar.sha256)
+            test "$(cat output/build/source-commit.txt)" = "$SOURCE_COMMIT"
+            tar -xf output/build/renderer.tar -C native
+          else
+            cmake -S native -B native/build -DCMAKE_BUILD_TYPE=Release 2>&1 | tee output/build/configure.log
+            cmake --build native/build --parallel 2 2>&1 | tee output/build/compile.log
+            tar -cf output/build/renderer.tar -C native build/bigbang
+            (cd output/build && sha256sum renderer.tar > renderer.tar.sha256)
+            echo "$SOURCE_COMMIT" > output/build/source-commit.txt
+          fi
+          chmod +x native/build/bigbang
+          if [[ -z "$RECOVERY_RUN" ]]; then
+            ctest --test-dir native/build --output-on-failure 2>&1 | tee output/build/ctest.log
+          fi
+          (cd native && python3 -m unittest discover -s tests -p test_film_render.py -v) 2>&1 | tee output/build/python-tests.log
+          env -u LIBGL_ALWAYS_SOFTWARE -u GALLIUM_DRIVER xvfb-run -a native/build/bigbang --renderer-info > output/build/default-driver.txt
+          xvfb-run -a native/build/bigbang --renderer-info > output/build/capture-driver.txt
+          env -u LIBGL_ALWAYS_SOFTWARE -u GALLIUM_DRIVER xvfb-run -a glxinfo -B > output/build/default-glxinfo.txt
+          cat output/build/default-driver.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Select exact non-overlapping frame ranges
+        id: matrix
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          scope = os.environ['SCOPE']
+          assert scope in ('benchmark', 'production')
+          ids = [2, 10, 16, 63, 83, 97] if scope == 'benchmark' else list(range(100))
+          recovered = set()
+          run = os.environ['RECOVERY_RUN']
+          if run:
+              assert run.isdecimal()
+              pages = subprocess.check_output(['gh', 'api', '--paginate', '--slurp', f'repos/{os.environ["GH_REPO"]}/actions/runs/{run}/artifacts'], text=True)
+              recovered = {a['name'] for page in json.loads(pages) for a in page['artifacts'] if not a['expired']}
+          rows = [{'id': f'{i:03d}', 'first': i * 90 + 1, 'last': (i + 1) * 90, 'recover': f'uhd-part-{i:03d}' in recovered} for i in ids]
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write('matrix=' + json.dumps({'include': rows}, separators=(',', ':')) + '\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write(f'\nScope: {scope}; immutable renderer {os.environ["SOURCE_COMMIT"]}; {len(rows)} parts of 90 native UHD frames. No final-film acceptance is implied.\n')
+          PY
+      - name: Preserve reusable executable and clean-build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uhd-renderer
+          path: output/build/
+          retention-days: 90
+          compression-level: 0
+          overwrite: true
+
+  render:
+    needs: prepare
+    name: Native UHD part ${{ matrix.id }} (${{ matrix.first }}-${{ matrix.last }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+          path: native
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install runtime and codec
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libglfw3 libgl1-mesa-dri xvfb xauth ffmpeg
+      - uses: actions/download-artifact@v4
+        with:
+          name: uhd-renderer
+          path: output/build
+      - name: Restore prior part without changing its identity
+        if: matrix.recover
+        uses: actions/download-artifact@v4
+        with:
+          name: uhd-part-${{ matrix.id }}
+          path: output/part
+          run-id: ${{ env.RECOVERY_RUN }}
+          github-token: ${{ github.token }}
+      - name: Restore current-run checkpoint on a failed-job rerun
+        if: github.run_attempt > 1
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PART: ${{ matrix.id }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          run = os.environ['GITHUB_RUN_ID']
+          name = 'uhd-part-' + os.environ['PART']
+          pages = json.loads(subprocess.check_output(['gh', 'api', '--paginate', '--slurp', f'repos/{os.environ["GH_REPO"]}/actions/runs/{run}/artifacts'], text=True))
+          if any(a['name'] == name and not a['expired'] for p in pages for a in p['artifacts']):
+              subprocess.run(['gh', 'run', 'download', run, '--name', name, '--dir', 'output/part'], check=True)
+          PY
+      - name: Render or revalidate exact native UHD checkpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd output/build && sha256sum --check renderer.tar.sha256)
+          test "$(cat output/build/source-commit.txt)" = "$SOURCE_COMMIT"
+          tar -xf output/build/renderer.tar -C native
+          chmod +x native/build/bigbang
+          resume=()
+          if [[ -f output/part/manifest.json ]]; then resume=(--resume); fi
+          timeout --signal=INT --kill-after=25s 55m xvfb-run -a -s '-screen 0 3840x2160x24' python3 native/scripts/render_film.py --binary native/build/bigbang --output-dir output/part --first-frame ${{ matrix.first }} --end-frame ${{ matrix.last }} --width 3840 --height 2160 --fps 30 --chunk-frames 30 --chunk-timeout 1200 --preset fast --crf 16 "${resume[@]}"
+      - name: Verify no-op resume and publish measured continuous timings
+        shell: bash
+        run: |
+          set -euo pipefail
+          find output/part/chunks -type f -printf '%f %T@\n' | sort > output/before-resume.txt
+          timeout 5m xvfb-run -a -s '-screen 0 3840x2160x24' python3 native/scripts/render_film.py --binary native/build/bigbang --output-dir output/part --first-frame ${{ matrix.first }} --end-frame ${{ matrix.last }} --width 3840 --height 2160 --fps 30 --chunk-frames 30 --chunk-timeout 1200 --preset fast --crf 16 --resume
+          find output/part/chunks -type f -printf '%f %T@\n' | sort > output/after-resume.txt
+          diff -u output/before-resume.txt output/after-resume.txt
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          p = Path('output/part')
+          m = json.loads((p/'manifest.json').read_text())
+          s = json.loads((p/'checkpoint.json').read_text())
+          assert s['status'] == 'complete' and s['final']['frames'] == 90
+          rows = [{'first': c['first_frame'], 'last': c['end_frame'], 'frames': c['frames'], 'seconds': c['render_and_encode_wall_seconds'], 'seconds_per_frame': c['render_and_encode_wall_seconds']/c['frames']} for c in s['chunks'].values()]
+          report = {'source': m['source']['git_head'], 'renderer': m['renderer'], 'native_size': [3840,2160], 'total_frames':90, 'continuous_clip_seconds':3, 'context_batch_frames':30, 'chunks':rows, 'resume_revalidated_without_rendering':True, 'final':s['final'], 'scope':os.environ['SCOPE'], 'full_film_accepted':False}
+          (p/'continuous-benchmark.json').write_text(json.dumps(report, indent=2)+'\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write('\n~~~json\n'+json.dumps(report,indent=2)+'\n~~~\n')
+          PY
+          ffmpeg -nostdin -v error -i output/part/film.mp4 -vf 'select=eq(n\,0)+eq(n\,44)+eq(n\,89),scale=640:360,tile=3x1' -frames:v 1 output/part/review-contact.jpg
+      - name: Preserve every verified chunk, manifest and failure log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uhd-part-${{ matrix.id }}
+          path: output/part/
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
+          overwrite: true
