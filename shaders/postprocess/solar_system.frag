@@ -73,6 +73,14 @@ float sphereIntersect(vec3 origin,vec3 dir,vec3 center,float radius) {
     if(t<0.03)t=-b+q;
     return t>0.03 ? t : 1.0e20;
 }
+// Recognizable terrestrial landmasses from smoothly distorted, manually
+// art-directed analytic continental masses (not an actual NASA Earth map).
+// Angular longitude wrapping prevents a fake seam in the texture.
+float v4Continent(vec2 ll,vec2 center,vec2 width) {
+    float delta=atan(sin(ll.x-center.x),cos(ll.x-center.x));
+    vec2 p=vec2(delta/width.x,(ll.y-center.y)/width.y);
+    return exp(-dot(p,p));
+}
 vec3 planetAlbedo(int id,vec3 n,float time) {
     vec3 rot=vec3(cos(time*0.023),sin(time*0.023),0.0);
     vec3 q=vec3(n.x*rot.x-n.y*rot.y,n.x*rot.y+n.y*rot.x,n.z);
@@ -87,20 +95,40 @@ vec3 planetAlbedo(int id,vec3 n,float time) {
         return mix(vec3(0.73,0.57,0.35),vec3(0.98,0.88,0.67),
                    smoothstep(0.30,0.77,strata));
     }
-    if(id==2) { // Earth — dark ocean, irregular continents, cloud systems
-        float land=fbm3(q*3.8+vec3(4.0,11.0,0.6));
-        land+=0.14*(fbm3(q*13.3+vec3(2.7))-0.5);
-        vec3 ocean=mix(vec3(0.012,0.055,0.23),
-                       vec3(0.029,0.26,0.45),
-                       smoothstep(0.18,0.79,var));
-        vec3 forest=mix(vec3(0.16,0.21,0.065),
-                        vec3(0.36,0.31,0.15),var);
-        float icy=smoothstep(0.76,0.98,abs(n.z));
-        vec3 globe=mix(ocean,forest,smoothstep(0.49,0.56,land));
-        globe=mix(globe,vec3(0.84,0.88,0.89),icy);
-        float clouds=fbm3(q*12.0+vec3(time*0.009,4.0,12.0));
-        float cloudMask=smoothstep(0.59,0.71,clouds);
-        return mix(globe,vec3(0.91,0.94,0.98),cloudMask*0.66);
+    if(id==2) { // Earth — recognisable oceans, continents, ice and clouds
+        // Smooth, procedural geography: North/South America, Eurasia,
+        // Africa, Arabia, Australasia and Antarctica; *not* a map texture.
+        vec2 ll=vec2(atan(q.y,q.x),asin(clamp(q.z,-1.0,1.0)));
+        float mass=0.0;
+        mass=max(mass,v4Continent(ll,vec2(-1.75,0.71),vec2(0.65,0.43)));
+        mass=max(mass,v4Continent(ll,vec2(-1.19,-0.28),vec2(0.33,0.63)));
+        mass=max(mass,v4Continent(ll,vec2(1.04,0.74),vec2(1.35,0.43)));
+        mass=max(mass,v4Continent(ll,vec2(0.36,0.07),vec2(0.46,0.68)));
+        mass=max(mass,v4Continent(ll,vec2(2.37,-0.47),vec2(0.40,0.27)));
+        mass=max(mass,v4Continent(ll,vec2(0.69,0.44),vec2(0.28,0.19)));
+        float corrugation=fbm3(q*10.0+vec3(3.0,5.5,7.7));
+        float coastal=smoothstep(0.39,0.53,mass+
+                                 0.17*(corrugation-0.5));
+        float shallow=smoothstep(0.29,0.40,mass+
+                                 0.17*(corrugation-0.5));
+        vec3 deepWater=vec3(0.008,0.045,0.165);
+        vec3 coastalWater=vec3(0.035,0.21,0.36);
+        vec3 ocean=mix(deepWater,coastalWater,
+                       0.24+0.75*shallow);
+        vec3 vegetation=mix(vec3(0.075,0.20,0.09),
+                            vec3(0.19,0.27,0.095),corrugation);
+        float arid=smoothstep(0.15,0.55,q.z)*
+                   smoothstep(0.33,0.62,fbm3(q*5.1+vec3(14.7)));
+        vegetation=mix(vegetation,vec3(0.47,0.35,0.17),arid*0.55);
+        vec3 globe=mix(ocean,vegetation,coastal);
+        float polar=smoothstep(0.75,0.94,abs(q.z));
+        globe=mix(globe,vec3(0.83,0.90,0.96),polar);
+        // Low-to-high latitude swirling, partially transparent cloud sheets.
+        float clouds=fbm3(q*10.5+vec3(0.0,time*0.014,2.0));
+        float cloudEdges=fbm3(q*22.0+vec3(time*0.003,4.0,5.3));
+        float cloudMask=smoothstep(0.60,0.75,clouds+
+                                   0.19*(cloudEdges-0.5));
+        return mix(globe,vec3(0.87,0.94,1.04),cloudMask*0.78);
     }
     if(id==3) { // Mars — rust deserts and volcanic highlands
         return mix(vec3(0.39,0.13,0.075),vec3(0.83,0.37,0.18),
@@ -148,11 +176,11 @@ void main() {
     vec3 wideCamera=vec3(10.0+8.0*dolly,-56.0+12.0*dolly,28.0-9.0*dolly);
     // Final 7 seconds: purposeful fly-in toward Earth, after an extended
     // wide shot showing all eight orbiting planets around the Sun.
-    float fly=smoothstep(0.82,0.995,progress);
+    float fly=smoothstep(0.81,0.966,progress);
     // End on a clearly visible globe rather than the previous tiny Earth.
     // Easing starts late, giving the disc and entire eight-planet system
     // plenty of screen time before the emotional final close-up.
-    vec3 closeCamera=earth+vec3(0.75,-2.6,1.4);
+    vec3 closeCamera=earth+vec3(0.70,-2.8,1.35);
     vec3 camera=mix(wideCamera,closeCamera,fly);
     vec3 target=mix(vec3(0.0),earth,fly*0.995);
     vec3 forward=normalize(target-camera);
@@ -216,7 +244,7 @@ void main() {
             // Tiny atmosphere scatter/rim on Earth and the ice giants.
             if(object==2 || object>=6) {
                 float rim=pow(1.0-max(0.0,dot(n,-ray)),4.5);
-                color+=vec3(0.10,0.24,0.54)*rim*0.36;
+                color+=vec3(0.11,0.32,0.85)*rim*0.63;
             }
         }
     }
@@ -257,8 +285,8 @@ void main() {
     // space. Glow does not pretend to depict actual sound in space.
     vec3 toSun=-camera;
     float rayDist=length(cross(toSun,ray));
-    float halo=exp(-rayDist*0.12)*0.075+
-               exp(-rayDist*0.44)*0.17;
+    float halo=exp(-rayDist*0.12)*0.044+
+               exp(-rayDist*0.44)*0.15;
     float glowMask=(object==8) ? 0.0 : 1.0;
     float sunIgnition=smoothstep(263.0,276.0,t);
     color+=vec3(1.0,0.40,0.10)*halo*glowMask*(0.18+0.82*sunIgnition);
