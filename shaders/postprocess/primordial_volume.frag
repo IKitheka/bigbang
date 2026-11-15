@@ -56,6 +56,10 @@ float coherentStructure(vec3 p, float t) {
     float scale = 1.0 + 0.035 * max(0.0, t-8.0);
     vec3 q = p / scale;
     float drift = fbm(q*0.10+vec3(0.4,1.7,2.2));
+    float gate = smoothstep(0.51,0.65,drift);
+    // A zero gate makes the final product exactly zero. Avoid the five
+    // remaining noise fields only in that case; preserve all nonzero detail.
+    if (gate == 0.0) return 0.0;
     vec3 warped = q + vec3(
         2.6*(fbm(q*0.075+vec3(3.8,1.1,0.4))-0.5),
         2.6*(fbm(q*0.075+vec3(0.9,4.8,1.3))-0.5),
@@ -65,7 +69,6 @@ float coherentStructure(vec3 p, float t) {
     float fine = fbm(warped*0.37+vec3(-2.1,1.4,6.5));
     float sheet = exp(-390.0*(large-0.595)*(large-0.595));
     float fractured = smoothstep(0.48,0.68,fine);
-    float gate = smoothstep(0.51,0.65,drift);
     return sheet * fractured * gate;
 }
 
@@ -111,11 +114,17 @@ void main() {
         // Gradually broaden density correlations into a radiation-coupled
         // continuum after inflation, without introducing star-like points.
         // Shared field coordinates prevent an abrupt change at 50 seconds.
-        vec3 plasmaP = p/(1.0+0.035*max(0.0,uTime-8.0));
-        float plasmaNoise = fbm(plasmaP*0.24+vec3(3.1,0.7,1.9));
-        float plasmaDetail = fbm(plasmaP*0.46+vec3(1.3,5.7,-2.1));
-        float plasmaField = smoothstep(0.43,0.72,plasmaNoise) *
-            mix(0.55,1.0,plasmaDetail);
+        float plasmaDetail = 0.0;
+        float plasmaField = 0.0;
+        // Before 48s this uniform weight is exactly zero. The plasma
+        // cannot affect extinction or radiance, so skip its two FBM fields.
+        if (plasmaWeight > 0.0) {
+            vec3 plasmaP = p/(1.0+0.035*max(0.0,uTime-8.0));
+            float plasmaNoise = fbm(plasmaP*0.24+vec3(3.1,0.7,1.9));
+            plasmaDetail = fbm(plasmaP*0.46+vec3(1.3,5.7,-2.1));
+            plasmaField = smoothstep(0.43,0.72,plasmaNoise) *
+                mix(0.55,1.0,plasmaDetail);
+        }
         // Do not skip low-density regions until the independent V7 field
         // has been evaluated. This is additional emissive structure, not a
         // replacement for the V4 universe or an artificially bright sky.

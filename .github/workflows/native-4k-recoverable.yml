@@ -1,0 +1,496 @@
+name: Recoverable native UHD production
+
+on:
+  push:
+    branches: [release/native-4k-university-final]
+    paths: [.github/workflows/native-4k-recoverable.yml]
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: Six continuous pilots or all 100 production parts
+        type: choice
+        options: [benchmark, production]
+        default: benchmark
+      recovery_run:
+        description: Prior workflow run whose exact binary and parts should be reused
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: recoverable-native-uhd-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SOURCE_COMMIT: 461ed7c8f3b93428b2ed869e9238963cdef29f5e
+  SCOPE: ${{ inputs.scope || 'production' }}
+  RECOVERY_RUN: ${{ inputs.recovery_run || '43749106085' }}
+  LIBGL_ALWAYS_SOFTWARE: '1'
+  GALLIUM_DRIVER: llvmpipe
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: delivery
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+          path: native
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y build-essential cmake git libglfw3-dev libglm-dev libgl1-mesa-dev libgl1-mesa-dri xvfb xauth ffmpeg mesa-utils python3-yaml
+      - name: Check production scripts and protect approved renderer content
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C delivery diff --exit-code "$SOURCE_COMMIT" HEAD -- src include shaders scripts/render_film.py scripts/create_original_score.py
+          python3 - <<'PY'
+          import ast, re, subprocess, yaml
+          from pathlib import Path
+          spec=yaml.safe_load(Path('delivery/.github/workflows/native-4k-recoverable.yml').read_text())
+          count=0
+          for job_name,job in spec['jobs'].items():
+              for i,step in enumerate(job.get('steps',[])):
+                  script=step.get('run','')
+                  if not script:
+                      continue
+                  shell_source=re.sub(r'\$\{\{.*?\}\}','CI_VALUE',script)
+                  subprocess.run(['bash','-n'],input=shell_source,text=True,check=True)
+                  for source in re.findall(r"python3 - <<'PY'\n(.*?)\nPY(?:\n|$)",script,re.S):
+                      ast.parse(source,filename=f'{job_name}/step-{i}')
+                      count+=1
+          assert count>=6,count
+          print(f'PASS: shell syntax and {count} embedded Python scripts; approved renderer content unchanged')
+          PY
+      - name: Build once or recover the exact previous executable
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output/build
+          if [[ -n "$RECOVERY_RUN" ]]; then
+            [[ "$RECOVERY_RUN" =~ ^[0-9]+$ ]]
+            if [[ "$RECOVERY_RUN" == '43749106085' ]]; then
+              test "$(gh run view "$RECOVERY_RUN" --json conclusion --jq .conclusion)" = success
+            fi
+            gh run download "$RECOVERY_RUN" --name uhd-renderer --dir output/build
+            (cd output/build && sha256sum --check renderer.tar.sha256)
+            test "$(cat output/build/source-commit.txt)" = "$SOURCE_COMMIT"
+            tar -xf output/build/renderer.tar -C native
+          else
+            cmake -S native -B native/build -DCMAKE_BUILD_TYPE=Release 2>&1 | tee output/build/configure.log
+            cmake --build native/build --parallel 2 2>&1 | tee output/build/compile.log
+            tar -cf output/build/renderer.tar -C native build/bigbang
+            (cd output/build && sha256sum renderer.tar > renderer.tar.sha256)
+            echo "$SOURCE_COMMIT" > output/build/source-commit.txt
+          fi
+          chmod +x native/build/bigbang
+          if [[ -z "$RECOVERY_RUN" ]]; then
+            ctest --test-dir native/build --output-on-failure 2>&1 | tee output/build/ctest.log
+          fi
+          (cd native && python3 -m unittest discover -s tests -p test_film_render.py -v) 2>&1 | tee output/build/python-tests.log
+          env -u LIBGL_ALWAYS_SOFTWARE -u GALLIUM_DRIVER xvfb-run -a native/build/bigbang --renderer-info > output/build/default-driver.txt
+          xvfb-run -a native/build/bigbang --renderer-info > output/build/capture-driver.txt
+          env -u LIBGL_ALWAYS_SOFTWARE -u GALLIUM_DRIVER xvfb-run -a glxinfo -B > output/build/default-glxinfo.txt
+          cat output/build/default-driver.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Test UHD assembly gates against transported native footage
+        if: env.RECOVERY_RUN != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile delivery/scripts/assemble_native_4k.py
+          gh run download 43749106085 --name uhd-part-097 --dir output/test-input/part
+          python3 - <<'PY'
+          import importlib.util, json, os, shutil
+          from pathlib import Path
+          spec = importlib.util.spec_from_file_location('assembly', 'delivery/scripts/assemble_native_4k.py')
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          incoming, native = Path('output/test-input'), Path('native').resolve()
+          source = os.environ['SOURCE_COMMIT']
+          result = module.audit_parts(incoming,native,source,require_full=False)
+          assert result['verified_frames']==90 and not result['coverage_complete']
+          passed = ['valid transported native 90-frame pilot']
+          def rejected(label, expected, full=False):
+              try:
+                  module.audit_parts(incoming,native,source,require_full=full)
+              except RuntimeError as exc:
+                  assert expected in str(exc), (label, str(exc))
+                  passed.append(label)
+              else:
+                  raise RuntimeError('Invalid input accepted: '+label)
+          rejected('incomplete full-film coverage','Incomplete 9000-frame coverage',True)
+          manifest = incoming/'part/manifest.json'
+          original = manifest.read_bytes()
+          for label,field,value,expected in [
+              ('1080p substitution rejected','width',1920,'Wrong native contract'),
+              ('wrong executable rejected','binary_sha256','0'*64,'Native executable checksum mismatch')]:
+              data = json.loads(original)
+              data['identity'][field] = value
+              manifest.write_text(json.dumps(data))
+              try:
+                  rejected(label,expected)
+              finally:
+                  manifest.write_bytes(original)
+          data = json.loads(original)
+          data['source']['git_head'] = '0'*40
+          manifest.write_text(json.dumps(data))
+          try:
+              rejected('wrong source commit rejected','Wrong source commit')
+          finally:
+              manifest.write_bytes(original)
+          chunk = next((incoming/'part/chunks').glob('*.mp4'))
+          saved = chunk.read_bytes()
+          chunk.write_bytes(bytes([saved[0]^1])+saved[1:])
+          try:
+              rejected('corrupt transported chunk rejected','Transport corruption')
+          finally:
+              chunk.write_bytes(saved)
+          shutil.copytree(incoming/'part',incoming/'duplicate')
+          try:
+              rejected('duplicate frame coverage rejected','Duplicate part')
+          finally:
+              shutil.rmtree(incoming/'duplicate')
+          Path('output/build/assembly-gate-tests.json').write_text(json.dumps({'passed':passed,'count':len(passed)},indent=2)+'\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
+              f.write('\nAssembly preflight: '+str(len(passed))+' real-footage acceptance/rejection checks passed.\n')
+          PY
+      - name: Select exact non-overlapping frame ranges
+        id: matrix
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          scope = os.environ['SCOPE']
+          assert scope in ('benchmark', 'production')
+          ids = [2, 10, 16, 63, 83, 97] if scope == 'benchmark' else list(range(100))
+          recovered = set()
+          run = os.environ['RECOVERY_RUN']
+          if run:
+              assert run.isdecimal()
+              pages = subprocess.check_output(['gh', 'api', '--paginate', '--slurp', f'repos/{os.environ["GH_REPO"]}/actions/runs/{run}/artifacts'], text=True)
+              recovered = {a['name'] for page in json.loads(pages) for a in page['artifacts'] if not a['expired']}
+          rows = [{'id': f'{i:03d}', 'first': i * 90 + 1, 'last': (i + 1) * 90, 'recover': f'uhd-part-{i:03d}' in recovered} for i in ids]
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write('matrix=' + json.dumps({'include': rows}, separators=(',', ':')) + '\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write(f'\nScope: {scope}; immutable renderer {os.environ["SOURCE_COMMIT"]}; {len(rows)} parts of 90 native UHD frames. No final-film acceptance is implied.\n')
+          PY
+      - name: Preserve reusable executable and clean-build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uhd-renderer
+          path: output/build/
+          retention-days: 90
+          compression-level: 0
+          overwrite: true
+
+  render:
+    needs: prepare
+    name: Native UHD part ${{ matrix.id }} (${{ matrix.first }}-${{ matrix.last }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+          path: native
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install runtime and codec
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libglfw3 libgl1-mesa-dri xvfb xauth ffmpeg
+      - uses: actions/download-artifact@v4
+        with:
+          name: uhd-renderer
+          path: output/build
+      - name: Restore prior part without changing its identity
+        if: matrix.recover && github.run_attempt == 1
+        uses: actions/download-artifact@v4
+        with:
+          name: uhd-part-${{ matrix.id }}
+          path: output/part
+          run-id: ${{ env.RECOVERY_RUN }}
+          github-token: ${{ github.token }}
+      - name: Restore current-run checkpoint on a failed-job rerun
+        if: github.run_attempt > 1
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PART: ${{ matrix.id }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          run = os.environ['GITHUB_RUN_ID']
+          name = 'uhd-part-' + os.environ['PART']
+          pages = json.loads(subprocess.check_output(['gh', 'api', '--paginate', '--slurp', f'repos/{os.environ["GH_REPO"]}/actions/runs/{run}/artifacts'], text=True))
+          if any(a['name'] == name and not a['expired'] for p in pages for a in p['artifacts']):
+              subprocess.run(['gh', 'run', 'download', run, '--name', name, '--dir', 'output/part'], check=True)
+          PY
+      - name: Render or revalidate exact native UHD checkpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd output/build && sha256sum --check renderer.tar.sha256)
+          test "$(cat output/build/source-commit.txt)" = "$SOURCE_COMMIT"
+          tar -xf output/build/renderer.tar -C native
+          chmod +x native/build/bigbang
+          resume=()
+          if [[ -f output/part/manifest.json ]]; then resume=(--resume); fi
+          timeout --signal=INT --kill-after=25s 55m xvfb-run -a -s '-screen 0 3840x2160x24' python3 native/scripts/render_film.py --binary native/build/bigbang --output-dir output/part --first-frame ${{ matrix.first }} --end-frame ${{ matrix.last }} --width 3840 --height 2160 --fps 30 --chunk-frames 30 --chunk-timeout 1200 --preset fast --crf 16 "${resume[@]}"
+      - name: Verify no-op resume and publish measured continuous timings
+        shell: bash
+        run: |
+          set -euo pipefail
+          find output/part/chunks -type f -printf '%f %T@\n' | sort > output/before-resume.txt
+          timeout 5m xvfb-run -a -s '-screen 0 3840x2160x24' python3 native/scripts/render_film.py --binary native/build/bigbang --output-dir output/part --first-frame ${{ matrix.first }} --end-frame ${{ matrix.last }} --width 3840 --height 2160 --fps 30 --chunk-frames 30 --chunk-timeout 1200 --preset fast --crf 16 --resume
+          find output/part/chunks -type f -printf '%f %T@\n' | sort > output/after-resume.txt
+          diff -u output/before-resume.txt output/after-resume.txt
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          p = Path('output/part')
+          m = json.loads((p/'manifest.json').read_text())
+          s = json.loads((p/'checkpoint.json').read_text())
+          assert s['status'] == 'complete' and s['final']['frames'] == 90
+          rows = [{'first': c['first_frame'], 'last': c['end_frame'], 'frames': c['frames'], 'seconds': c['render_and_encode_wall_seconds'], 'seconds_per_frame': c['render_and_encode_wall_seconds']/c['frames']} for c in s['chunks'].values()]
+          report = {'source': m['source']['git_head'], 'renderer': m['renderer'], 'native_size': [3840,2160], 'total_frames':90, 'continuous_clip_seconds':3, 'context_batch_frames':30, 'chunks':rows, 'resume_revalidated_without_rendering':True, 'final':s['final'], 'scope':os.environ['SCOPE'], 'full_film_accepted':False}
+          (p/'continuous-benchmark.json').write_text(json.dumps(report, indent=2)+'\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write('\n~~~json\n'+json.dumps(report,indent=2)+'\n~~~\n')
+          PY
+          ffmpeg -nostdin -v error -y -i output/part/film.mp4 -vf 'select=eq(n\,0)+eq(n\,44)+eq(n\,89),scale=640:360,tile=3x1' -frames:v 1 output/part/review-contact.jpg
+      - name: Preserve every verified chunk, manifest and failure log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uhd-part-${{ matrix.id }}
+          path: output/part/
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
+          overwrite: true
+
+
+  assemble:
+    needs: render
+    if: github.event_name == 'push' || inputs.scope == 'production'
+    name: Verify full UHD picture, original stereo score and viewing editions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+          path: native
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install verification and original-score dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ffmpeg python3-numpy
+      - uses: actions/download-artifact@v4
+        with:
+          name: uhd-renderer
+          path: output/build
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: uhd-part-*
+          path: output/incoming
+      - name: Verify every source chunk and assemble exact 300-second stereo editions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output/final
+          (cd output/build && sha256sum --check renderer.tar.sha256)
+          tar -xf output/build/renderer.tar -C native
+          python3 scripts/assemble_native_4k.py --incoming output/incoming --out output/final --native-root native --source-sha "$SOURCE_COMMIT" 2>&1 | tee output/assembly.log
+          git -C native archive --format=zip --prefix=BigBang_Renderer_Source/ -o "$GITHUB_WORKSPACE/output/final/BigBang_Renderer_Source.zip" "$SOURCE_COMMIT"
+          git archive --format=zip --prefix=BigBang_Complete_Project/ -o output/final/BigBang_Complete_Project.zip "$GITHUB_SHA"
+          (cd output/final && sha256sum *.zip > ARCHIVE_SHA256SUMS.txt)
+          python3 - <<'PY'
+          import zipfile
+          from pathlib import Path
+          for p in Path('output/final').glob('*.zip'):
+              with zipfile.ZipFile(p) as z:
+                  assert z.testzip() is None, p
+          PY
+          echo 'Technical UHD assembly passed. Full screening, transition approval, presentation and persistent release/download verification remain pending.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve assembled technical screening package and ZIP archives
+        uses: actions/upload-artifact@v4
+        with:
+          name: BigBang_NATIVE_UHD_Technical_Screening
+          retention-days: 90
+          compression-level: 0
+          path: |
+            output/final/*.zip
+            output/final/*SHA256SUMS.txt
+            output/final/*.json
+            output/final/*.md
+            output/final/Storyboard.jpg
+      - name: Preserve assembly diagnostics even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uhd-assembly-diagnostics
+          path: |
+            output/assembly.log
+            output/final/*.json
+          if-no-files-found: warn
+          retention-days: 90
+
+
+  durable-screening-release:
+    needs: assemble
+    name: Publish technically verified screening archives and verify downloads
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: native-4k-screening-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install independent media decoder
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ffmpeg
+      - uses: actions/download-artifact@v4
+        with:
+          name: BigBang_NATIVE_UHD_Technical_Screening
+          path: output/release
+      - name: Publish screening release without claiming final submission acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, importlib.util, json, os, subprocess, zipfile
+          from pathlib import Path
+          def run(args, capture=False):
+              return subprocess.run(args,check=True,timeout=1800,stdout=subprocess.PIPE if capture else None,text=True).stdout
+          def sha(path):
+              h=hashlib.sha256()
+              with path.open('rb') as f:
+                  for b in iter(lambda:f.read(2**20),b''):
+                      h.update(b)
+              return h.hexdigest()
+          root=Path('output/release')
+          report=json.loads((root/'Validation_Report.json').read_text())
+          assert report['technical_validation_passed'] and report['coverage_complete'] and report['verified_frames']==9000
+          assert report['source_commit']==os.environ['SOURCE_COMMIT'] and report['full_film_accepted'] is False
+          files=sorted(p for p in root.iterdir() if p.is_file())
+          assert all(p.stat().st_size < 2*1024**3 for p in files), 'Asset exceeds GitHub Release size limit'
+          for p in files:
+              if p.suffix=='.zip':
+                  with zipfile.ZipFile(p) as z:
+                      assert z.testzip() is None,p
+          tag=os.environ['RELEASE_TAG']
+          repo=os.environ['GH_REPO']
+          url=f'https://github.com/{repo}/releases/tag/{tag}'
+          notes=Path('output/screening-notes.md')
+          body=('# Native UHD technical screening — submission incomplete\n\n'
+              'This release preserves the technically verified 300-second, 9,000-frame native 3840x2160 picture, its original stereo score, 1080p and easy-play derivatives, storyboard, source and validation evidence.\n\n'
+              'Full viewing/listening, subjective transition approval, and finished presentation/report exports remain pending. This is a technical screening prerelease, not final university-submission acceptance.\n\n'
+              f'Renderer commit: {os.environ["SOURCE_COMMIT"]}. Production run: https://github.com/{repo}/actions/runs/{os.environ["GITHUB_RUN_ID"]}.\n\n'
+              'Download and extract the Native_4K ZIP for the UHD movie, the 1080p or Easy_Play ZIP for other players, and Evidence/Source ZIPs for implementation and checks. Each screening archive includes checksums for its own contents.\n\n'
+              f'![Extracted storyboard](https://github.com/{repo}/releases/download/{tag}/Storyboard.jpg)\n')
+          notes.write_text(body)
+          existing=subprocess.run(['gh','release','view',tag,'--json','isPrerelease,assets'],stdout=subprocess.PIPE,text=True)
+          if existing.returncode:
+              run(['gh','release','create',tag,'--target',os.environ['SOURCE_COMMIT'],'--prerelease','--title','Big Bang native 4K technical screening — final submission pending','--notes-file',str(notes)])
+              available=set()
+          else:
+              state=json.loads(existing.stdout)
+              assert state['isPrerelease'], 'Existing release is not the expected screening prerelease'
+              available={a['name'] for a in state['assets']}
+          actual=run(['gh','api',f'repos/{repo}/commits/{tag}','--jq','.sha'],capture=True).strip()
+          assert actual==os.environ['SOURCE_COMMIT'],'Release tag points at a different renderer commit'
+          downloaded=Path('output/release-roundtrip')
+          downloaded.mkdir(parents=True,exist_ok=True)
+          hashes={p.name:sha(p) for p in files}
+          for p in files:
+              if p.name not in available:
+                  run(['gh','release','upload',tag,str(p)])
+              run(['gh','release','download',tag,'--pattern',p.name,'--dir',str(downloaded),'--clobber'])
+              assert sha(downloaded/p.name)==hashes[p.name],f'Release transport mismatch: {p.name}'
+              if p.suffix=='.zip':
+                  with zipfile.ZipFile(downloaded/p.name) as z:
+                      assert z.testzip() is None,p.name
+                      if 'BigBang/SHA256SUMS.txt' in z.namelist():
+                          for line in z.read('BigBang/SHA256SUMS.txt').decode().splitlines():
+                              expected,name=line.split('  ',1)
+                              h=hashlib.sha256()
+                              with z.open('BigBang/'+name) as f:
+                                  for b in iter(lambda:f.read(2**20),b''):
+                                      h.update(b)
+                              assert h.hexdigest()==expected,(p.name,name)
+          spec=importlib.util.spec_from_file_location('assembly','scripts/assemble_native_4k.py')
+          assembly=importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(assembly)
+          checked=[]
+          for archive,movie,size in [('BigBang_Native_4K.zip','BigBang_300s_NATIVE_4K30_Stereo.mp4',(3840,2160)),('BigBang_1080p.zip','BigBang_300s_1080p30_Stereo.mp4',(1920,1080)),('BigBang_Easy_Play.zip','BigBang_300s_Easy_Play_360p30_Stereo.mp4',(640,360))]:
+              with zipfile.ZipFile(downloaded/archive) as z:
+                  path=Path(z.extract('BigBang/'+movie,'output/downloaded-media'))
+              assembly.verify_av(path,size)
+              checked.append({'archive':archive,'movie':movie,'size':list(size),'frames':9000,'seconds':300,'stereo':True,'strict_decode_after_release_download':True})
+          verification={'release_url':url,'source_commit':os.environ['SOURCE_COMMIT'],'run_id':os.environ['GITHUB_RUN_ID'],'asset_sha256':hashes,'downloaded_media':checked,'all_asset_hashes_match':True,'archive_crc_and_internal_hashes_verified':True,'full_film_accepted':False,'complete_viewing_and_listening':'pending','presentation_and_report_exports':'pending'}
+          proof=Path('output/Release_Download_Verification.json')
+          proof.write_text(json.dumps(verification,indent=2)+'\n')
+          if proof.name not in available:
+              run(['gh','release','upload',tag,str(proof)])
+          else:
+              run(['gh','release','download',tag,'--pattern',proof.name,'--dir',str(downloaded),'--clobber'])
+              assert sha(downloaded/proof.name)==sha(proof),'Existing release verification differs'
+          run(['gh','release','download',tag,'--pattern',proof.name,'--dir',str(downloaded),'--clobber'])
+          assert sha(downloaded/proof.name)==sha(proof)
+          notes.write_text(body+'\nAll release assets were downloaded and compared by SHA-256. ZIP CRC/internal checksums and strict full decode of all three downloaded audiovisual editions passed. See Release_Download_Verification.json. Final audiovisual and submission acceptance remain pending.\n')
+          run(['gh','release','edit',tag,'--notes-file',str(notes)])
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
+              f.write(f'\n[Durable technical screening release]({url}) passed asset download/hash, ZIP and full audiovisual decode checks. Final submission remains incomplete.\n')
+          PY
+      - name: Preserve independent release validation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uhd-release-download-verification
+          path: |
+            output/Release_Download_Verification.json
+            output/screening-notes.md
+          if-no-files-found: warn
+          retention-days: 90
