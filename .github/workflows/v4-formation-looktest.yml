@@ -1,0 +1,143 @@
+# V4 cinema QA: revised terrestrial geography and final close-up; verify source render
+# V4 reference looktest retry after GLSL symbol fix; source remains native
+name: V4 formation-to-planets native looktest
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/v4-formation-looktest.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  evidence:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 32
+    env:
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      GALLIUM_DRIVER: llvmpipe
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install native C++ OpenGL, media and audio dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential cmake git libglfw3-dev libglm-dev \
+            libgl1-mesa-dev libgl1-mesa-dri xvfb xauth \
+            ffmpeg python3-numpy
+      - name: Compile and test native engine
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+          python3 -m unittest discover -s tests -p test_film_render.py -v
+      - name: Capture true native 1080p scene phases and 640p storyboard
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output/v4/stills output/v4/ordered
+          git rev-parse HEAD > output/v4/source_commit.txt
+          xvfb-run -a -s '-screen 0 1920x1080x24' bash -c '
+            set -euo pipefail
+            for t in 260 264 268 272 276 280 284 288 292 296 299; do
+              timeout 50s build/bigbang --time "$t" --fps 30 \
+                --width 640 --height 360 --output "output/v4/stills/t$t.png" >/dev/null
+              echo "Native storyboard $t"
+            done
+            for t in 268 280 294 299; do
+              timeout 80s build/bigbang --time "$t" --fps 30 \
+                --width 1920 --height 1080 --output "output/v4/stills/HD_t$t.png" >/dev/null
+              echo "Native 1920x1080 $t"
+            done
+          '
+          i=0
+          for t in 260 264 268 272 276 280 284 288 292 296 299; do
+            printf -v dst 'output/v4/ordered/frame_%02d.png' "$i"
+            cp "output/v4/stills/t$t.png" "$dst"
+            i=$((i+1))
+          done
+          ffmpeg -nostdin -hide_banner -loglevel error -y -framerate 1 \
+            -i 'output/v4/ordered/frame_%02d.png' \
+            -vf 'tile=4x3:margin=5:padding=4:color=black' \
+            -frames:v 1 output/v4/formation_11_frame_storyboard.png
+      - name: Render the entire new 40-second ending with genuine C++ frames
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=TERM --kill-after=20s 22m \
+            xvfb-run -a -s '-screen 0 1280x720x24' \
+            bash -c '
+              set -euo pipefail
+              ./build/bigbang --start-frame 7801 --end-frame 9000 \
+                --fps 30 --width 640 --height 360 --raw-video - |
+              ffmpeg -nostdin -hide_banner -loglevel error -y \
+                -f rawvideo -pixel_format rgb24 -video_size 640x360 \
+                -framerate 30 -i pipe:0 -an \
+                -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p \
+                -movflags +faststart \
+                output/v4/Formation_to_Earth_40s_360p_video_only.mp4
+            '
+      - name: Mix original soundtrack and export browser-playable formation preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 scripts/create_original_score.py --seconds 300 \
+            --output output/v4/original_full_film_music.wav
+          ffmpeg -nostdin -hide_banner -loglevel error -y \
+            -i output/v4/Formation_to_Earth_40s_360p_video_only.mp4 \
+            -ss 260 -t 40 -i output/v4/original_full_film_music.wav \
+            -map 0:v:0 -map 1:a:0 -c:v copy \
+            -c:a aac -b:a 160k -ar 48000 -ac 2 \
+            -movflags +faststart \
+            output/v4/Formation_to_Earth_40s_With_Sound.mp4
+          ffmpeg -nostdin -hide_banner -loglevel error -y \
+            -i output/v4/Formation_to_Earth_40s_With_Sound.mp4 \
+            -vf 'scale=480:270:flags=lanczos,fps=15' \
+            -c:v libx264 -preset veryfast -crf 29 -pix_fmt yuv420p \
+            -c:a aac -b:a 96k -movflags +faststart \
+            output/v4/Formation_to_Earth_40s_Easy_Play.mp4
+          python3 - <<'PY'
+          import json,subprocess,pathlib
+          for name,fps,frames in [
+            ('Formation_to_Earth_40s_With_Sound.mp4','30/1',1200),
+            ('Formation_to_Earth_40s_Easy_Play.mp4','15/1',600)]:
+              path=pathlib.Path('output/v4')/name
+              j=json.loads(subprocess.check_output([
+                'ffprobe','-v','error','-count_frames',
+                '-show_entries','format=duration:stream=codec_type,codec_name,width,height,avg_frame_rate,nb_read_frames,channels',
+                '-of','json',str(path)],text=True))
+              v=next(x for x in j['streams'] if x['codec_type']=='video')
+              a=next(x for x in j['streams'] if x['codec_type']=='audio')
+              assert v['codec_name']=='h264' and v['avg_frame_rate']==fps and int(v['nb_read_frames'])==frames,(name,j)
+              assert a['codec_name']=='aac' and a['channels']==2 and abs(float(j['format']['duration'])-40)<0.07,(name,j)
+              subprocess.run(['ffmpeg','-nostdin','-v','error','-xerror',
+                '-i',str(path),'-f','null','-'],check=True,timeout=240)
+              (path.with_suffix('.json')).write_text(json.dumps(j,indent=2))
+          print('Verified 40s native C++ formation animation + original AAC, full clean decode')
+          PY
+          rm output/v4/original_full_film_music.wav
+      - name: Upload exact source-linked clips and frames
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v4-native-formation-preview-${{ github.run_id }}
+          retention-days: 21
+          if-no-files-found: warn
+          path: |
+            output/v4/*.mp4
+            output/v4/*.png
+            output/v4/*.json
+            output/v4/*.txt
+            output/v4/stills/HD_*.png
+            output/v4/stills/t*.png
+      - name: Review declaration
+        if: always()
+        run: |
+          echo 'V4 renders native C++17 OpenGL+GLSL: molecular cloud -> rotating nebular disk -> proto-Sun -> emerging planets -> Earth fly-in.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'All scales and orbital growth timing are illustrative; no astrophysical N-body claim. YouTube sources are references only, not frames in this film.' >> "$GITHUB_STEP_SUMMARY"
