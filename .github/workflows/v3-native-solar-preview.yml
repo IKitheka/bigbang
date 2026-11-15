@@ -1,0 +1,114 @@
+name: V3 solar-system and soundtrack native looktest
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/v3-native-solar-preview.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 24
+    env:
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      GALLIUM_DRIVER: llvmpipe
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install C++ OpenGL/Mesa/FFmpeg/audio dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential cmake git libglfw3-dev libglm-dev libgl1-mesa-dev \
+            libgl1-mesa-dri xvfb xauth ffmpeg python3-numpy
+      - name: Compile and test source
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+          python3 -m unittest discover -s tests -p 'test_film_render.py' -v
+          /usr/bin/python3 -m py_compile scripts/create_original_score.py
+      - name: Render representative original C++ scene frames
+        run: |
+          set -euo pipefail
+          mkdir -p output/v3_preview/stills
+          xvfb-run -a -s '-screen 0 1920x1080x24' bash -c '
+            set -euo pipefail
+            for t in 0 3 5 7 10 16 18 22 50 80 105 138 163 183 199 230 254 260 264 270 280 290 295 299; do
+              timeout 40s build/bigbang --time "$t" --fps 30 --width 640 \
+                --height 360 --output "output/v3_preview/stills/t$t.png" >/dev/null
+              echo "Native C++ still t=$t s"
+            done
+            for t in 265 284 298; do
+              timeout 60s build/bigbang --time "$t" --fps 30 --width 1920 \
+                --height 1080 --output "output/v3_preview/stills/HD_t$t.png" >/dev/null
+              echo "Native 1920x1080 still t=$t s"
+            done
+          '
+      - name: Render real Solar System movement and encode
+        run: |
+          set -euo pipefail
+          xvfb-run -a -s '-screen 0 1280x720x24' bash -c '
+            set -euo pipefail
+            build/bigbang --start-frame 8161 --end-frame 8220 \
+              --fps 30 --width 640 --height 360 --raw-video - |
+            ffmpeg -nostdin -hide_banner -loglevel error -y \
+              -f rawvideo -pixel_format rgb24 -video_size 640x360 \
+              -framerate 30 -i pipe:0 \
+              -c:v libx264 -preset veryfast -crf 18 \
+              -pix_fmt yuv420p -movflags +faststart \
+              output/v3_preview/solar_system_272_274s.mp4
+          '
+          ffprobe -v error -count_frames -show_entries \
+            stream=width,height,avg_frame_rate,nb_read_frames:format=duration \
+            -of json output/v3_preview/solar_system_272_274s.mp4 \
+            > output/v3_preview/solar_preview_metadata.json
+      - name: Synthesize original stereo sound and audition sample
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 scripts/create_original_score.py \
+            --seconds 30 --output output/v3_preview/original_audio_30s.wav
+          ffprobe -v error -show_entries \
+            stream=codec_name,sample_rate,channels:format=duration \
+            -of json output/v3_preview/original_audio_30s.wav \
+            > output/v3_preview/audio_metadata.json
+          ffmpeg -nostdin -hide_banner -loglevel error -y \
+            -i output/v3_preview/original_audio_30s.wav \
+            -c:a aac -b:a 160k output/v3_preview/original_audio_30s.m4a
+      - name: Assemble contact sheet from actual native renders
+        run: |
+          set -euo pipefail
+          mkdir -p output/v3_preview/ordered
+          i=0
+          for t in 0 3 5 7 10 16 18 22 50 80 105 138 163 183 199 230 254 260 264 270 280 290 295 299; do
+            printf -v dst 'output/v3_preview/ordered/frame_%02d.png' "$i"
+            ffmpeg -hide_banner -loglevel error -y \
+              -i "output/v3_preview/stills/t$t.png" \
+              -frames:v 1 -vf scale=320:180 "$dst"
+            i=$((i+1))
+          done
+          ffmpeg -hide_banner -loglevel error -y -framerate 1 \
+            -i 'output/v3_preview/ordered/frame_%02d.png' \
+            -vf 'tile=4x6:margin=5:padding=5:color=black' \
+            -frames:v 1 output/v3_preview/24_frame_storyboard.png
+      - name: Upload native scene previews and original audio
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v3-native-solar-audio-preview-${{ github.run_id }}
+          retention-days: 21
+          if-no-files-found: warn
+          path: |
+            output/v3_preview/*.png
+            output/v3_preview/*.mp4
+            output/v3_preview/*.m4a
+            output/v3_preview/*.json
+            output/v3_preview/stills/HD_*.png
+            output/v3_preview/stills/t*.png
