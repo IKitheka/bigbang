@@ -26,8 +26,8 @@ concurrency:
 
 env:
   SOURCE_COMMIT: 461ed7c8f3b93428b2ed869e9238963cdef29f5e
-  SCOPE: ${{ inputs.scope || 'benchmark' }}
-  RECOVERY_RUN: ${{ inputs.recovery_run || '' }}
+  SCOPE: ${{ inputs.scope || 'production' }}
+  RECOVERY_RUN: ${{ inputs.recovery_run || '43749106085' }}
   LIBGL_ALWAYS_SOFTWARE: '1'
   GALLIUM_DRIVER: llvmpipe
 
@@ -38,6 +38,11 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          path: delivery
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.SOURCE_COMMIT }}
@@ -58,6 +63,9 @@ jobs:
           mkdir -p output/build
           if [[ -n "$RECOVERY_RUN" ]]; then
             [[ "$RECOVERY_RUN" =~ ^[0-9]+$ ]]
+            if [[ "$RECOVERY_RUN" == '43749106085' ]]; then
+              test "$(gh run view "$RECOVERY_RUN" --json conclusion --jq .conclusion)" = success
+            fi
             gh run download "$RECOVERY_RUN" --name uhd-renderer --dir output/build
             (cd output/build && sha256sum --check renderer.tar.sha256)
             test "$(cat output/build/source-commit.txt)" = "$SOURCE_COMMIT"
@@ -78,6 +86,71 @@ jobs:
           xvfb-run -a native/build/bigbang --renderer-info > output/build/capture-driver.txt
           env -u LIBGL_ALWAYS_SOFTWARE -u GALLIUM_DRIVER xvfb-run -a glxinfo -B > output/build/default-glxinfo.txt
           cat output/build/default-driver.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Test UHD assembly gates against transported native footage
+        if: env.RECOVERY_RUN != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile delivery/scripts/assemble_native_4k.py
+          gh run download "$RECOVERY_RUN" --name uhd-part-097 --dir output/test-input/part
+          python3 - <<'PY'
+          import importlib.util, json, os, shutil
+          from pathlib import Path
+          spec = importlib.util.spec_from_file_location('assembly', 'delivery/scripts/assemble_native_4k.py')
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          incoming, native = Path('output/test-input'), Path('native').resolve()
+          source = os.environ['SOURCE_COMMIT']
+          result = module.audit_parts(incoming,native,source,require_full=False)
+          assert result['verified_frames']==90 and not result['coverage_complete']
+          passed = ['valid transported native 90-frame pilot']
+          def rejected(label, expected, full=False):
+              try:
+                  module.audit_parts(incoming,native,source,require_full=full)
+              except RuntimeError as exc:
+                  assert expected in str(exc), (label, str(exc))
+                  passed.append(label)
+              else:
+                  raise RuntimeError('Invalid input accepted: '+label)
+          rejected('incomplete full-film coverage','Incomplete 9000-frame coverage',True)
+          manifest = incoming/'part/manifest.json'
+          original = manifest.read_bytes()
+          for label,field,value,expected in [
+              ('1080p substitution rejected','width',1920,'Wrong native contract'),
+              ('wrong executable rejected','binary_sha256','0'*64,'Native executable checksum mismatch')]:
+              data = json.loads(original)
+              data['identity'][field] = value
+              manifest.write_text(json.dumps(data))
+              try:
+                  rejected(label,expected)
+              finally:
+                  manifest.write_bytes(original)
+          data = json.loads(original)
+          data['source']['git_head'] = '0'*40
+          manifest.write_text(json.dumps(data))
+          try:
+              rejected('wrong source commit rejected','Wrong source commit')
+          finally:
+              manifest.write_bytes(original)
+          chunk = next((incoming/'part/chunks').glob('*.mp4'))
+          saved = chunk.read_bytes()
+          chunk.write_bytes(bytes([saved[0]^1])+saved[1:])
+          try:
+              rejected('corrupt transported chunk rejected','Transport corruption')
+          finally:
+              chunk.write_bytes(saved)
+          shutil.copytree(incoming/'part',incoming/'duplicate')
+          try:
+              rejected('duplicate frame coverage rejected','Duplicate part')
+          finally:
+              shutil.rmtree(incoming/'duplicate')
+          Path('output/build/assembly-gate-tests.json').write_text(json.dumps({'passed':passed,'count':len(passed)},indent=2)+'\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
+              f.write('\nAssembly preflight: '+str(len(passed))+' real-footage acceptance/rejection checks passed.\n')
+          PY
       - name: Select exact non-overlapping frame ranges
         id: matrix
         env:
@@ -201,3 +274,75 @@ jobs:
           retention-days: 90
           compression-level: 0
           overwrite: true
+
+
+  assemble:
+    needs: render
+    if: github.event_name == 'push' || inputs.scope == 'production'
+    name: Verify full UHD picture, original stereo score and viewing editions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+          path: native
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install verification and original-score dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ffmpeg python3-numpy
+      - uses: actions/download-artifact@v4
+        with:
+          name: uhd-renderer
+          path: output/build
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: uhd-part-*
+          path: output/incoming
+      - name: Verify every source chunk and assemble exact 300-second stereo editions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output/final
+          (cd output/build && sha256sum --check renderer.tar.sha256)
+          tar -xf output/build/renderer.tar -C native
+          python3 scripts/assemble_native_4k.py --incoming output/incoming --out output/final --native-root native --source-sha "$SOURCE_COMMIT" 2>&1 | tee output/assembly.log
+          git -C native archive --format=zip --prefix=BigBang_Renderer_Source/ -o "$GITHUB_WORKSPACE/output/final/BigBang_Renderer_Source.zip" "$SOURCE_COMMIT"
+          git archive --format=zip --prefix=BigBang_Complete_Project/ -o output/final/BigBang_Complete_Project.zip "$GITHUB_SHA"
+          (cd output/final && sha256sum *.zip > ARCHIVE_SHA256SUMS.txt)
+          python3 - <<'PY'
+          import zipfile
+          from pathlib import Path
+          for p in Path('output/final').glob('*.zip'):
+              with zipfile.ZipFile(p) as z:
+                  assert z.testzip() is None, p
+          PY
+          echo 'Technical UHD assembly passed. Full screening, transition approval, presentation and persistent release/download verification remain pending.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve assembled technical screening package and ZIP archives
+        uses: actions/upload-artifact@v4
+        with:
+          name: BigBang_NATIVE_UHD_Technical_Screening
+          retention-days: 90
+          compression-level: 0
+          path: |
+            output/final/*.zip
+            output/final/*SHA256SUMS.txt
+            output/final/*.json
+            output/final/*.md
+            output/final/Storyboard.jpg
+      - name: Preserve assembly diagnostics even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uhd-assembly-diagnostics
+          path: |
+            output/assembly.log
+            output/final/*.json
+          if-no-files-found: warn
+          retention-days: 90
