@@ -20,11 +20,7 @@ float noise3(vec3 p){
     float a=mix(hash31(i),hash31(i+vec3(1,0,0)),f.x);
     float b=mix(hash31(i+vec3(0,1,0)),hash31(i+vec3(1,1,0)),f.x);
     float c=mix(hash31(i+vec3(0,0,1)),hash31(i+vec3(1,0,1)),f.x);
-    float d=mix(hash31(i+vec3(0,0,1)+vec3(1,1,0)),
-                hash31(i+vec3(1,1,1)),f.x);
-    // top layer: corners z=1
-    c=mix(hash31(i+vec3(0,0,1)),hash31(i+vec3(1,0,1)),f.x);
-    d=mix(hash31(i+vec3(0,1,1)),hash31(i+vec3(1,1,1)),f.x);
+    float d=mix(hash31(i+vec3(0,1,1)),hash31(i+vec3(1,1,1)),f.x);
     return mix(mix(a,b,f.y),mix(c,d,f.y),f.z);
 }
 float fbm3(vec3 p){
@@ -84,5 +80,9 @@ void main(){
 
     // Alpha is nonzero only 240<t<260. Additively glowed source avoids
     // masking the original 4,400-galaxy catalogue or making a grey whiteout.
-    FragColor=vec4(max(radiance,vec3(0.0))*2.0,amount*0.92);
+    // Leave the 4,400 galaxies readable through the journey. The first
+    // HDR pass drove mean scene luma near 0.27, creating a flat grey veil.
+    // Reducing both radiance and additive opacity keeps a cinematic dust
+    // transition with deep negative space rather than an all-sky fog.
+    FragColor=vec4(max(radiance,vec3(0.0))*1.20,amount*0.66);
 }
