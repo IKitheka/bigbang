@@ -157,7 +157,7 @@ int main(int argc,char** argv) {
             // STAGES 1/4/6/8: world-space procedural early-universe volume,
             // original NASA-style opening, and true 3D galaxy catalogue.
             // End the shortened early-universe chapters once the expanded nebula takes over.
-            if(t<132.0f) {
+            if(t<cinematic::kSolarFullReveal) {
                 if(sceneT<=56.0f)
                     drawVolume(primordial,primordial::cameraAt(sceneT),
                                sceneT,width,height,quad);
@@ -182,15 +182,15 @@ int main(int argc,char** argv) {
                 // material leading from the distant galaxy field towards
                 // the protoplanetary chapter. This additive, bounded overlay
                 // fades by t=130; the established Earth endpoint is retained.
-                if(t>105.0f && t<130.0f) {
+                if(t>105.0f && t<118.0f) {
                     glEnable(GL_BLEND);
                     glBlendFunc(GL_SRC_ALPHA,GL_ONE);
                     drawVolume(galaxyBridge,cinematic::cameraAt(sceneT),
-                               sceneT,width,height,quad,cinematic::targetAt(sceneT));
+                               sceneT,width,height,quad,cinematic::targetAt(sceneT),t);
                     glDisable(GL_BLEND);
                 }
             }
-            if(t>=118.0f) {
+            if(t>=cinematic::kSolarStart) {
                 // Original 3D ray-sphere Sun, all eight orbiting planets,
                 // Earth/oceans/clouds and Saturn rings are shaded in GLSL.
                 glEnable(GL_BLEND);
