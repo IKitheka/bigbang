@@ -32,25 +32,17 @@ struct Chapter {
 
 constexpr int kFilmDurationSeconds = 300;
 
+// V12: nine STORY chapters; not to be confused with the nine graphics pipeline stages.
 constexpr std::array<Chapter, 9> kChapters{{
-    {Epoch::AbstractOrigin, 0, 20, "abstract_origin",
-     "NASA-inspired purple ignition and expansive primordial origin metaphor"},
-    {Epoch::Inflation, 20, 50, "inflation",
-     "Growing primordial correlations and expansion"},
-    {Epoch::QuarkGluonPlasma, 50, 82, "quark_gluon_plasma",
-     "Hot turbulent early-universe continuum"},
-    {Epoch::PrimordialNucleosynthesis, 82, 116, "nucleosynthesis",
-     "Warm locally energetic early nuclear process metaphor"},
-    {Epoch::OpaquePlasma, 116, 149, "opaque_plasma",
-     "Luminous optically thick photon-electron-baryon medium"},
-    {Epoch::RecombinationCmb, 149, 176, "recombination_cmb",
-     "Radiation decoupling and increasing optical transparency"},
-    {Epoch::DarkAges, 176, 196, "dark_ages",
-     "Brief near-dark neutral gas and developing density structure"},
-    {Epoch::CosmicDawnGalaxies, 196, 260, "cosmic_dawn_galaxies",
-     "First luminous stars, dense galaxy field and evolving cosmic web"},
-    {Epoch::SolarSystem, 260, 300, "solar_system",
-     "Illustrative present-day Solar System with Sun and eight orbiting planets"}
+    {Epoch::AbstractOrigin, 0, 15, "abstract_origin", "Bright speculative origin and ignition"},
+    {Epoch::Inflation, 15, 35, "inflation", "Rapid expansion of primordial fluctuations"},
+    {Epoch::QuarkGluonPlasma, 35, 50, "quark_gluon_plasma", "Hot early-universe plasma"},
+    {Epoch::PrimordialNucleosynthesis, 50, 65, "nucleosynthesis", "Illustration of light nucleus formation"},
+    {Epoch::OpaquePlasma, 65, 73, "opaque_plasma", "Light-scattering ionized matter"},
+    {Epoch::RecombinationCmb, 73, 80, "recombination_cmb", "Neutral atoms and transparent universe"},
+    {Epoch::DarkAges, 80, 87, "dark_ages", "Brief pre-stellar darkness"},
+    {Epoch::CosmicDawnGalaxies, 87, 120, "cosmic_dawn_galaxies", "First stars, galaxies and the molecular-cloud journey"},
+    {Epoch::SolarSystem, 120, 300, "solar_system", "Young Sun, accretion, planetesimals, eight planets and Earth"},
 }};
 
 constexpr bool isWellFormed() {
