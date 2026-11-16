@@ -113,3 +113,37 @@ vec3 v4YoungPlanetColor(vec3 established,float development,
                     smoothstep(0.37,0.80,scars));
     return mix(molten,established,smoothstep(0.28,0.95,development));
 }
+
+
+// V12: evolving clumps in a flattened disk. The bodies are procedurally
+// located in WORLD SPACE; the effect is neither a screen HUD nor an
+// accurate collisional simulation. The youngest dust grains precede the
+// explicit ray-sphere planetesimals in solar_system.frag.
+vec3 v12AccretionSeeds(vec3 origin,vec3 dir,float filmT,float opaqueDepth) {
+    float activity=smoothstep(149.0,173.0,filmT)*
+                   (1.0-smoothstep(245.0,269.0,filmT));
+    if(activity<0.0001 || abs(dir.z)<0.025) return vec3(0.0);
+    vec3 glow=vec3(0.0);
+    for(int layer=0;layer<2;++layer) {
+        float planeZ=(float(layer)-0.5)*0.48;
+        float travel=(planeZ-origin.z)/dir.z;
+        if(travel<=0.02 || travel>=opaqueDepth) continue;
+        vec3 p=origin+travel*dir;
+        float r=length(p.xy);
+        if(r<2.0 || r>22.0) continue;
+        vec2 cell=floor(p.xy*0.64);
+        vec2 local=fract(p.xy*0.64);
+        vec2 center=vec2(hash21(cell+vec2(13.2,7.7)),
+                         hash21(cell+vec2(6.9,21.1)));
+        float d=length(local-center);
+        float seed=hash21(cell+vec2(3.4,9.8));
+        float grain=exp(-d*d*170.0)*step(0.77,seed);
+        float band=0.45+0.55*sin(r*0.85+filmT*0.004);
+        float growth=smoothstep(177.0,222.0,filmT);
+        vec3 cool=vec3(0.30,0.40,0.52);
+        vec3 hot=vec3(1.10,0.68,0.31);
+        vec3 tint=mix(cool,hot,0.35+0.65*growth);
+        glow+=tint*grain*activity*(0.30+0.70*band)*0.58;
+    }
+    return glow;
+}
