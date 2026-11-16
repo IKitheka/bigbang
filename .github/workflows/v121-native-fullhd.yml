@@ -1,10 +1,12 @@
 name: V12.1 native Full HD — five-minute planetary screening candidate
 
 on:
-  pull_request:
+  # Deliberate one-shot production: editing this workflow starts a native
+  # 9,000-frame render. Other shader commits only run the preview CI.
+  push:
+    branches: [feature/v12-1-planetary-cinematic-polish]
     paths:
       - '.github/workflows/v121-native-fullhd.yml'
-      - 'scripts/assemble_v121_true1080p.py'
   workflow_dispatch:
 
 permissions:
@@ -16,7 +18,7 @@ concurrency:
 
 jobs:
   native-hd:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     name: "TRUE 1080p native part ${{ matrix.id }}"
     runs-on: ubuntu-24.04
     timeout-minutes: 58
