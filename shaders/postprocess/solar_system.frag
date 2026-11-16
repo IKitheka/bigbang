@@ -312,10 +312,11 @@ void main() {
     // Sun's layered corona and warm lens glow, preserving deep negative
     // space. Glow does not pretend to depict actual sound in space.
     vec3 toSun=-camera;
-    float rayDist=length(cross(toSun,ray));
-    float halo=exp(-rayDist*0.12)*0.044+
-               exp(-rayDist*0.44)*0.15;
-    float glowMask=(object==8) ? 0.0 : 1.0;
+    float angularRadius=sunRadius/max(length(toSun),sunRadius);
+    float angularDistance=length(cross(normalize(toSun),ray));
+    float halo=0.06*exp(-angularDistance/max(angularRadius*2.5,0.001))+
+               0.10*exp(-angularDistance/max(angularRadius*0.85,0.001));
+    float glowMask=(object<0 && dot(toSun,ray)>0.0) ? 1.0 : 0.0;
     float sunIgnition=v121Ease(120.0,145.0,filmT);
     color+=vec3(1.0,0.40,0.10)*halo*glowMask*(1.0-medium.a)*(0.18+0.82*sunIgnition);
 
