@@ -41,6 +41,6 @@ inline float solarSceneTime(float filmTime) {
 // V12.1: cloud entry overlaps the final galaxy approach; the same cloud
 // then collapses into the disc in world space. Film length is unchanged.
 constexpr float kSolarStart=110.0f;
-constexpr float kSolarFullReveal=128.0f;
+constexpr float kSolarFullReveal=118.0f;
 } // namespace cinematic
 #endif
