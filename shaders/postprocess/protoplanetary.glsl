@@ -92,7 +92,7 @@ void v121Camera(float filmT,vec3 earth,vec3 jupiter,out vec3 camera,out vec3 tar
     if(filmT>=215.0) {a=jupiter+vec3(5.0,-12.0,6.0);b=vec3(10.0,-32.0,18.0);ta=jupiter*0.85;tb=vec3(0.0);lo=215.0;hi=245.0;}
     if(filmT>=245.0) {a=b;b=vec3(18.0,-44.0,23.0);ta=vec3(0.0);lo=245.0;hi=265.0;}
     if(filmT>=265.0) {a=vec3(18.0,-44.0,23.0);b=a;ta=vec3(0.0);lo=265.0;hi=283.0;}
-    if(filmT>=283.0) {a=vec3(18.0,-44.0,23.0);b=earth+vec3(0.70,-2.8,1.35);ta=vec3(0.0);tb=earth*0.995;lo=283.0;hi=300.0;}
+    if(filmT>=283.0) {a=vec3(18.0,-44.0,23.0);b=earth+normalize(-earth)*0.95+vec3(0.15,-1.15,0.52);ta=vec3(0.0);tb=earth*0.995;lo=283.0;hi=300.0;}
     float e=v121Ease(lo,hi,filmT);
     camera=mix(a,b,e);target=mix(ta,tb,e);
 }
