@@ -321,6 +321,6 @@ void main() {
 
     // User asked for the solar system at the very end. Crossfade from the
     // dense-galaxy sequence without abruptly replacing a beautiful shot.
-    float cover=v121Ease(110.0,128.0,filmT);
+    float cover=v121Ease(110.0,118.0,filmT);
     FragColor=vec4(max(color,vec3(0.0)),cover);
 }
