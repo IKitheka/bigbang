@@ -137,13 +137,13 @@ vec3 v12AccretionSeeds(vec3 origin,vec3 dir,float filmT,float opaqueDepth) {
                          hash21(cell+vec2(6.9,21.1)));
         float d=length(local-center);
         float seed=hash21(cell+vec2(3.4,9.8));
-        float grain=exp(-d*d*170.0)*step(0.77,seed);
+        float grain=exp(-d*d*170.0)*step(0.68,seed);
         float band=0.45+0.55*sin(r*0.85+filmT*0.004);
         float growth=smoothstep(177.0,222.0,filmT);
         vec3 cool=vec3(0.30,0.40,0.52);
         vec3 hot=vec3(1.10,0.68,0.31);
         vec3 tint=mix(cool,hot,0.35+0.65*growth);
-        glow+=tint*grain*activity*(0.30+0.70*band)*0.58;
+        glow+=tint*grain*activity*(0.30+0.70*band)*0.86;
     }
     return glow;
 }
