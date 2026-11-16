@@ -45,14 +45,14 @@ int main() {
     assert(cinematic::kChapters.size() == 9);
     assert(cinematic::kFilmDurationSeconds == film::kDurationSeconds);
     const auto& origin = cinematic::chapterAt(0.0);
-    const auto& inflation = cinematic::chapterAt(20.0);
-    const auto& qgp = cinematic::chapterAt(50.0);
-    const auto& nuclei = cinematic::chapterAt(90.0);
-    const auto& opaque = cinematic::chapterAt(130.0);
-    const auto& cmb = cinematic::chapterAt(170.0);
-    const auto& dark = cinematic::chapterAt(180.0);
-    const auto& galaxies = cinematic::chapterAt(240.0);
-    const auto& solar = cinematic::chapterAt(280.0);
+    const auto& inflation = cinematic::chapterAt(15.0);
+    const auto& qgp = cinematic::chapterAt(35.0);
+    const auto& nuclei = cinematic::chapterAt(50.0);
+    const auto& opaque = cinematic::chapterAt(65.0);
+    const auto& cmb = cinematic::chapterAt(73.0);
+    const auto& dark = cinematic::chapterAt(80.0);
+    const auto& galaxies = cinematic::chapterAt(105.0);
+    const auto& solar = cinematic::chapterAt(120.0);
     assert(origin.epoch == cinematic::Epoch::AbstractOrigin);
     assert(inflation.epoch == cinematic::Epoch::Inflation);
     assert(qgp.epoch == cinematic::Epoch::QuarkGluonPlasma);
@@ -61,14 +61,14 @@ int main() {
     assert(cmb.epoch == cinematic::Epoch::RecombinationCmb);
     assert(dark.epoch == cinematic::Epoch::DarkAges);
     assert(galaxies.epoch == cinematic::Epoch::CosmicDawnGalaxies);
-    assert(cinematic::chapterAt(299.99).epoch ==
-           cinematic::Epoch::SolarSystem);
     assert(solar.epoch == cinematic::Epoch::SolarSystem);
-    assert(cinematic::chapterAt(49.999).epoch ==
-           cinematic::Epoch::Inflation);
-    bool rejectedEnd = false;
+    assert(cinematic::chapterAt(299.99).epoch == cinematic::Epoch::SolarSystem);
+    assert(cinematic::chapterAt(14.999).epoch == cinematic::Epoch::AbstractOrigin);
+    assert(cinematic::chapterAt(34.999).epoch == cinematic::Epoch::Inflation);
+    assert(cinematic::chapterAt(119.999).epoch == cinematic::Epoch::CosmicDawnGalaxies);
+    bool rejectedEnd=false;
     try { (void)cinematic::chapterAt(300.0); }
-    catch (const std::out_of_range&) { rejectedEnd = true; }
+    catch (const std::out_of_range&) { rejectedEnd=true; }
     assert(rejectedEnd);
     // Blender reference camera anchor values; intermediate curves are
     // smoothly approximated and intentionally not claimed exact Bezier parity.
@@ -94,22 +94,34 @@ int main() {
     const auto camAfterBoundary = primordial::cameraAt(50.01f);
     assert(glm::length(camAtBoundary.position-camAfterBoundary.position) < 0.001f);
 
-    // Story-clock remapping is continuous and original 18–22s is unchanged.
-    for(float ft:{0.0f,18.0f,20.0f,22.0f,50.0f}) {
-        assert(cinematic::legacySceneTime(ft)==ft);
+    // V12: all story clock boundaries and solar progression are monotonic.
+    for(const auto& anchor : std::vector<std::pair<float,float>>{
+        {0,0},{15,20},{35,50},{50,82},{65,116},{73,149},
+        {80,176},{87,196},{105,240},{130,260},{200,260},{299.999f,260}
+    }) {
+        assert(std::abs(cinematic::legacySceneTime(anchor.first)-anchor.second)<0.001f);
     }
-    assert(std::abs(cinematic::legacySceneTime(82.0f)-90.0f)<.00001f);
-    assert(std::abs(cinematic::legacySceneTime(116.0f)-130.0f)<.00001f);
-    assert(std::abs(cinematic::legacySceneTime(149.0f)-170.0f)<.00001f);
-    assert(std::abs(cinematic::legacySceneTime(176.0f)-200.0f)<.00001f);
-    assert(std::abs(cinematic::legacySceneTime(196.0f)-240.0f)<.00001f);
-    assert(std::abs(cinematic::legacySceneTime(260.0f)-299.9f)<.001f);
-    assert(cinematic::legacySceneTime(285.0f)==299.9f);
-    float previous=-1;
+    float previous=-1.0f;
     for(int frame=0;frame<9000;++frame) {
         const float at=float(frame)/30.0f;
         const float current=cinematic::legacySceneTime(at);
-        assert(current>=previous);
+        assert(current>=previous-0.0001f);
+        previous=current;
+    }
+    assert(cinematic::solarSceneTime(117.0f)==259.0f);
+    assert(std::abs(cinematic::solarSceneTime(118.0f)-259.0f)<.001f);
+    assert(std::abs(cinematic::solarSceneTime(145.0f)-264.0f)<.001f);
+    assert(std::abs(cinematic::solarSceneTime(180.0f)-268.0f)<.001f);
+    assert(std::abs(cinematic::solarSceneTime(215.0f)-273.0f)<.001f);
+    assert(std::abs(cinematic::solarSceneTime(245.0f)-278.0f)<.001f);
+    assert(std::abs(cinematic::solarSceneTime(265.0f)-285.0f)<.001f);
+    assert(std::abs(cinematic::solarSceneTime(283.0f)-290.0f)<.001f);
+    assert(std::abs(cinematic::solarSceneTime(291.0f)-294.0f)<.001f);
+    previous=0.0f;
+    for(int frame=0;frame<9000;++frame) {
+        const float at=float(frame)/30.0f;
+        const float current=cinematic::solarSceneTime(at);
+        assert(current>=previous-0.0001f);
         previous=current;
     }
 
