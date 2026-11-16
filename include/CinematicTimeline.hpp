@@ -38,7 +38,9 @@ inline float solarSceneTime(float filmTime) {
     if(t<=291.0f) return mapInterval(t,283,291,290,294);
     return mapInterval(t,291,300,294,299.999f);
 }
-constexpr float kSolarStart=118.0f;
-constexpr float kSolarFullReveal=132.0f;
+// V12.1: cloud entry overlaps the final galaxy approach; the same cloud
+// then collapses into the disc in world space. Film length is unchanged.
+constexpr float kSolarStart=110.0f;
+constexpr float kSolarFullReveal=128.0f;
 } // namespace cinematic
 #endif
