@@ -246,10 +246,12 @@ void main() {
                       0.35+0.65*mottled)*(0.15+0.85*lit);
         } else if(object==8) {
             float granule=fbm3(n*13.0+vec3(filmT*0.007,2.0,4.0));
-            float hot=0.76+0.24*granule;
+            float hot=0.35+1.0*smoothstep(0.25,0.75,granule);
+            float limb=0.50+0.50*sqrt(max(dot(n,-ray),0.0));
+            float spots=smoothstep(0.66,0.78,noise3(n*6.0+vec3(1.7,4.2,filmT*0.003)));
             float ignition=v121Ease(120.0,145.0,filmT);
             vec3 protostar=vec3(0.52,0.19,0.065)*(0.72+0.45*granule);
-            vec3 mature=vec3(2.0,1.38,0.74)*hot;
+            vec3 mature=vec3(1.8,1.35,0.94)*hot*limb*(1.0-0.50*spots);
             color=mix(protostar,mature,ignition);
         } else {
             vec3 sunDir=normalize(-surface);
