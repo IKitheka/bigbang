@@ -10,7 +10,7 @@ ROOT=P(__file__).resolve().parents[1]
 OUT=ROOT/'output/v121'
 SHARED=ROOT/'output/v121_shared'
 TRANSITIONS={'galaxy_cloud':112,'cloud_sun':136,'sun_disc':174,
-             'disc_planetesimals':207,'embryos_planets':249,'system_earth':279}
+             'disc_planetesimals':207,'embryos_planets':249,'system_earth':288}
 
 def run(args,**kwargs):
     print('RUN',*[str(x) for x in args],flush=True)
@@ -128,12 +128,17 @@ def package(silent,start,frames,name,provenance):
          '-ar','48000','-ac','2','-movflags','+faststart',easy])
     editions=[video(master,960,540,frames),video(easy,640,360,frames)]
     motion=temporal(master,frames)
+    review_frames=[0,720,1800,2700,3600,4350,4800,5399] if frames==5400 else [0,60,120,180,240,359]
+    select='+'.join(f'eq(n,{n})' for n in review_frames)
     run(['ffmpeg','-nostdin','-v','error','-y','-i',master,'-vf',
-         'fps=1/2,scale=320:180:flags=lanczos,tile=6x1','-frames:v','1',folder/'Contact.png'])
+         "select='"+select+"',scale=320:180:flags=lanczos,tile="+str(len(review_frames))+'x1',
+         '-frames:v','1',folder/'Contact.png'])
+    run(['ffmpeg','-nostdin','-v','error','-y','-ss',(frames-1)/30,'-i',master,
+         '-frames:v','1',folder/'Final_Frame.png'])
     # Animated review image supplements the packaged, fully decoded H264 video.
     if frames==360:
-        run(['ffmpeg','-nostdin','-v','error','-y','-i',master,'-vf',
-             'fps=8,scale=480:270:flags=lanczos','-loop','0',folder/'Motion.gif'])
+        run(['ffmpeg','-nostdin','-v','error','-y','-i',master,'-an','-filter_complex',
+             '[0:v]fps=8,scale=480:270:flags=lanczos,split[a][b];[a]palettegen=stats_mode=full[p];[b][p]paletteuse=dither=sierra2_4a','-loop','0',folder/'Motion.gif'])
     report={'source_commit':head(),'native_resolution':[960,540],'global_start_seconds':start,
             'global_first_frame':start*30+1,'global_last_frame':start*30+frames,
             'editions':editions,'temporal':motion,'provenance':provenance,
