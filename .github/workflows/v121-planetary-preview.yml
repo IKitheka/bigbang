@@ -150,9 +150,9 @@ jobs:
           cp incoming/transitions/*.zip release/
           python3 - <<'PY'
           import pathlib, shutil
-          for folder in pathlib.Path('incoming/transitions').iterdir():
+          for folder in list(pathlib.Path('incoming/transitions').iterdir())+[pathlib.Path('output/v121/V12_1_Planetary_180s')]:
               if folder.is_dir():
-                  for name in ['Motion.gif','Contact.png']:
+                  for name in ['Motion.gif','Contact.png','Final_Frame.png']:
                       p=folder/name
                       if p.exists():shutil.copy(p,pathlib.Path('release')/(folder.name+'_'+name))
           PY
@@ -189,6 +189,8 @@ jobs:
           text+='Renderer/source commit: '+os.environ['GITHUB_SHA']+'\n\n'
           for p in sorted(pathlib.Path('release').glob('*.gif')):
               text+='!['+p.stem+'](https://github.com/'+repo+'/releases/download/'+tag+'/'+p.name+')\n\n'
+          text+='Animated review thumbnails use 8 fps; packaged MP4s retain all 30 fps native frames.\n\n'
+          text+='![Final native preview frame](https://github.com/'+repo+'/releases/download/'+tag+'/V12_1_Planetary_180s_Final_Frame.png)\n\n'
           pathlib.Path('Preview_Notes.md').write_text(text)
           PY
           if ! gh release view "$TAG" >/dev/null 2>&1; then
@@ -207,7 +209,11 @@ jobs:
           gh release download "$TAG" --pattern '*.zip' --dir downloaded
           (cd downloaded && sha256sum -c ../release/ARCHIVE_SHA256SUMS.txt)
           python3 scripts/v121_previews.py verify --incoming downloaded
-          gh release upload "$TAG" downloaded/Release_Download_Verification.json
+          if gh release download "$TAG" --pattern Release_Download_Verification.json --dir existing >/dev/null 2>&1; then
+            cmp downloaded/Release_Download_Verification.json existing/Release_Download_Verification.json
+          else
+            gh release upload "$TAG" downloaded/Release_Download_Verification.json
+          fi
           printf '\nAll seven released ZIPs were downloaded, SHA-256 and ZIP CRC/internal hashes checked, and all fourteen downloaded MP4s fully decoded. See Release_Download_Verification.json. Visual approval remains pending.\n' >> Preview_Notes.md
           gh release edit "$TAG" --notes-file Preview_Notes.md
           echo "https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
