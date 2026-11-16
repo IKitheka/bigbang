@@ -27,7 +27,7 @@ void framebufferSizeCallback(GLFWwindow*,int w,int h) { glViewport(0,0,w,h); }
 // The original pre-45s math and shader bytes are deliberately preserved.
 void drawVolume(Shader& shader,const primordial::CameraPose& pose,float t,
                 int width,int height,GLuint quad,
-                glm::vec3 lookAt=glm::vec3(0.0f)) {
+                glm::vec3 lookAt=glm::vec3(0.0f),float filmTime=-1.0f) {
     // Do not alter pre-dawn camera evaluation, especially the protected
     // 18–22s opening. After 240s the native camera can track a hero galaxy.
     const glm::vec3 forward = t<=240.0f
@@ -39,6 +39,7 @@ void drawVolume(Shader& shader,const primordial::CameraPose& pose,float t,
     const GLuint p=shader.getID();
     const float aspect=float(width)/float(height);
     glUniform1f(glGetUniformLocation(p,"uTime"),t);
+    glUniform1f(glGetUniformLocation(p,"uFilmTime"),filmTime>=0.0f?filmTime:t);
     glUniform3fv(glGetUniformLocation(p,"uCameraPos"),1,glm::value_ptr(pose.position));
     glUniform3fv(glGetUniformLocation(p,"uCameraForward"),1,glm::value_ptr(forward));
     glUniform3fv(glGetUniformLocation(p,"uCameraRight"),1,glm::value_ptr(right));
@@ -151,20 +152,20 @@ int main(int argc,char** argv) {
             glDisable(GL_BLEND);
             // Independently art-directed time compression: the old dark/gas
             // period is shortened without cropping the five-minute film.
-            // Original 0–50s rendering, including protected 18–22s, is exact.
+            // V12 deliberately retimes the original epochs while reusing their shaders.
             const float sceneT=cinematic::legacySceneTime(t);
             // STAGES 1/4/6/8: world-space procedural early-universe volume,
             // original NASA-style opening, and true 3D galaxy catalogue.
-            // Fade down expensive old epochs once the Solar System fills frame.
-            if(t<268.0f) {
+            // End the shortened early-universe chapters once the expanded nebula takes over.
+            if(t<132.0f) {
                 if(sceneT<=56.0f)
                     drawVolume(primordial,primordial::cameraAt(sceneT),
                                sceneT,width,height,quad);
-                if(t<18.0f) {
+                if(sceneT<18.0f) {
                     glEnable(GL_BLEND);
                     glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
-                    drawVolume(nasaOrigin,primordial::cameraAt(t),
-                               t,width,height,quad);
+                    drawVolume(nasaOrigin,primordial::cameraAt(sceneT),
+                               sceneT,width,height,quad);
                     glDisable(GL_BLEND);
                 }
                 if(sceneT>45.0f) {
@@ -177,25 +178,26 @@ int main(int argc,char** argv) {
                 if(sceneT>=240.0f)
                     deepField.draw(sceneT,cinematic::cameraAt(sceneT),
                                    cinematic::targetAt(sceneT),width,height);
-                // V9: short, optically thin fly-through of dusty molecular
+                // V12: shortened optically thin fly-through of dusty molecular
                 // material leading from the distant galaxy field towards
                 // the protoplanetary chapter. This additive, bounded overlay
-                // never alters t>=260: the approved 40s finale is protected.
-                if(t>240.0f && t<260.0f) {
+                // fades by t=130; the established Earth endpoint is retained.
+                if(t>105.0f && t<130.0f) {
                     glEnable(GL_BLEND);
                     glBlendFunc(GL_SRC_ALPHA,GL_ONE);
                     drawVolume(galaxyBridge,cinematic::cameraAt(sceneT),
-                               t,width,height,quad,cinematic::targetAt(sceneT));
+                               sceneT,width,height,quad,cinematic::targetAt(sceneT));
                     glDisable(GL_BLEND);
                 }
             }
-            if(t>=259.0f) {
+            if(t>=118.0f) {
                 // Original 3D ray-sphere Sun, all eight orbiting planets,
                 // Earth/oceans/clouds and Saturn rings are shaded in GLSL.
                 glEnable(GL_BLEND);
                 glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
                 drawVolume(solarSystem,cinematic::cameraAt(299.9f),
-                           t,width,height,quad);
+                           cinematic::solarSceneTime(t),width,height,quad,
+                           glm::vec3(0.0f),t);
                 glDisable(GL_BLEND);
             }
             HDRFramebuffer::unbind();

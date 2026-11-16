@@ -1,37 +1,65 @@
-# Native universe film
+# Big Bang — V12 planetary formation focus (university graphics project)
 
-C++17 / GLFW / GLAD / GLM / OpenGL 3.3 and GLSL render a deterministic, 300-second cinematic interpretation of cosmic history. Every movie pixel comes from the native renderer. Python supervises and verifies captures; FFmpeg encodes them.
+C++17 / OpenGL 3.3 Core / GLSL 330 / GLFW / GLAD / GLM native rendering. Five-minute (300-second) cinematic visualization at 30 frames per second; production goal is 9,000 actual 1920×1080 frames with an original deterministic stereo score.
 
-This branch replaces the later orange-particle prototypes with continuous world-space volumes, recombination, subdued dark ages and procedural stellar/galaxy formation. It preserves the approved 18–22 second shader, camera, HDR and composite path. This is a review film, not an approved photorealistic or quantitative cosmological simulation.
+**Status: V12 is a lecturer-feedback revision, not yet a validated full movie.** The completed [V11 1080p film](https://github.com/IKitheka/bigbang/actions/runs/43738384428/artifacts/14172696894) remains the reliable backup. Do not submit a V12 preview as a complete 1080p master.
 
-## Build and verify
+## Lecturer review and new emphasis
 
-Ubuntu dependencies: CMake 3.20+, a C++17 compiler, Git, GLFW 3.3, GLM and OpenGL development libraries. CMake fetches GLAD v2.0.8. FFmpeg and Python 3 are needed for movie delivery. Headless captures need Mesa, Xvfb and xauth.
+The lecturer requested a shorter cosmic/darkness sequence and much stronger planet-formation coverage. V12 now allocates approximately 2:00 to the Big Bang, early universe, first galaxies and molecular-cloud bridge, followed by approximately **3:00 of young Sun, circumstellar disc, visible dust clumps, planetesimal/embryo growth, eight planets and the Earth fly-in**.
 
-```sh
+The story is deliberately cinematic, not a quantitative N-body/accretion simulation. Physical times, sizes, velocities and orbital distances are greatly compressed. See [V12 director's notes and timeline](docs/V12_LECTURER_REVIEW.md) and the [nine conceptual graphics rendering stages](docs/RENDERING_PIPELINE.md).
+
+## Build on Ubuntu
+
+```bash
+sudo apt update
+sudo apt install -y build-essential cmake git libglfw3-dev libglm-dev \
+  libgl1-mesa-dev libgl1-mesa-dri xvfb xauth ffmpeg python3-numpy
+git clone --branch feature/v12-planetary-formation-focus https://github.com/IKitheka/bigbang.git
+cd bigbang
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel 2
 ctest --test-dir build --output-on-failure
-python3 -m unittest discover -s tests -p 'test_film_render.py' -v
+python3 -m unittest discover -s tests -p test_film_render.py -v
 ```
 
-## Capture
+The first CMake configuration fetches GLAD 2.0.8 and needs internet. `PROJECT_ROOT` is embedded at build time, so recompile after moving the checkout.
 
-From a desktop with a working OpenGL display:
+## Run and inspect the film
 
-```sh
-# Genuine native still.
-./build/bigbang --time 185 --fps 30 --width 960 --height 540 --output output/t185.png
-# Bounded two-second pipeline check.
-python3 scripts/render_film.py --binary build/bigbang --output-dir output/check --end-frame 60
-# Explicit complete 1080p review invocation: 9000 native frames, 300 seconds.
-python3 scripts/render_film.py --binary build/bigbang --output-dir output/review1080 --width 1920 --height 1080 --fps 30 --crf 16
-# Resume only the same source, binary, driver and settings.
-python3 scripts/render_film.py --binary build/bigbang --output-dir output/review1080 --width 1920 --height 1080 --fps 30 --crf 16 --resume
+```bash
+./build/bigbang
+./build/bigbang --renderer-info
+mkdir -p output/stills
+./build/bigbang --time 204 --fps 30 --width 960 --height 540 --output output/stills/planetesimals.png
+./build/bigbang --time 253 --fps 30 --width 960 --height 540 --output output/stills/protoplanet.png
+./build/bigbang --time 297 --fps 30 --width 960 --height 540 --output output/stills/earth.png
 ```
 
-For headless use, prefix the invocation with `LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a`. Check benchmarks first: the software driver can be much slower than a desktop GPU. No movie runs automatically at application launch. Batch review dimensions are capped at 1920×1080. The interactive defaults and single-frame capture interface remain available.
+To record a native 1080p clip under an Ubuntu display:
 
-Frames are one-based and sample `(frame-1)/fps`. At 30 fps, frames 1–9000 cover exactly 300 seconds of playback, with the last sample at 299.966667 seconds. One native process/context renders each chunk. Completed chunks receive hashes, metadata and full decode checks before checkpointing. A final MP4 is published only after all required frames validate. Never describe a partial artifact as a completed film.
+```bash
+python3 scripts/render_film.py --binary build/bigbang \
+  --output-dir output/v12_solar_preview --first-frame 7501 --end-frame 7560 \
+  --width 1920 --height 1080 --fps 30 \
+  --chunk-frames 30 --chunk-timeout 900 --preset fast --crf 18
+```
 
-The existing bounded Actions previews remain in place. `Complete native review film` adds an independently rebuilt protected-opening comparison and a full 640×360/30 fps review with 30-day artifacts. CI success verifies engineering, not artistic approval. See [rendering stages](docs/RENDERING_PIPELINE.md), [implementation and limits](docs/NATIVE_FILM_REVIEW.md), and the original [story contract](docs/CINEMATIC_STORY_REFERENCE.md).
+For headless CPU rendering, prefix the Python command with `LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s '-screen 0 1920x1080x24'`. Source frame IDs are one-based; frame N samples (N-1)/30 seconds. Do not confuse a 2-second preview with a complete movie.
+
+## Native production and automated validation
+
+- [V12 native preview workflow](.github/workflows/v12-planetary-preview.yml) compiles and tests from scratch, captures real stage frames and four consecutive 2-second scenes, and verifies the revised original score.
+- [V12 full native 1080p workflow](.github/workflows/v12-native-1080p-fullfilm.yml) distributes thirty nonoverlapping 300-frame sections. On success it invokes [V12 film assembly](scripts/assemble_v12_true1080p.py), which checks exact source commit, native resolution, decoded frame counts, H264, 300-second duration, stereo AAC, full decode and chapter transition metrics.
+- Movie previews and automated tests are engineering evidence, not proof of scientific calibration or subjective artistic approval.
+
+## Main source files
+
+`src/main.cpp` implements OpenGL context, scene routing, framebuffer HDR/bloom and readback.
+`include/CinematicStory.hpp` defines narrative chapters, `include/CinematicTimeline.hpp` remaps deterministic scene time.
+`shaders/postprocess/primordial_volume.frag`, `cosmic_evolution.frag` and `galaxy_to_solar_bridge.frag` render the first two minutes.
+`shaders/postprocess/solar_system.frag` and `protoplanetary.glsl` render the young Sun, world-space clumps, analytic accreting objects, mature planets, rings and Earth.
+`scripts/create_original_score.py` synthesizes original stereo music.
+
+There are nine **narrative** chapters and separately nine **conceptual rendering-pipeline** stages; these are not the same thing. Optional tessellation/geometry shader stages are not implemented by this OpenGL 3.3 film.

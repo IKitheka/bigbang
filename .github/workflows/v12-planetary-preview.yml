@@ -1,0 +1,70 @@
+name: V12 Planetary Formation — compile, test and native scene previews
+
+on:
+  push:
+    branches: [feature/v12-planetary-formation-focus]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'shaders/**'
+      - 'scripts/create_original_score.py'
+      - 'tests/**'
+      - '.github/workflows/v12-planetary-preview.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v12-planetary-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-scenes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      GALLIUM_DRIVER: llvmpipe
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install native dependencies and FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y build-essential cmake git libglfw3-dev libglm-dev libgl1-mesa-dev libgl1-mesa-dri xvfb xauth ffmpeg python3-numpy
+      - name: Clean build, CTest, Python regressions and soundtrack generation
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+          python3 -m unittest discover -s tests -p test_film_render.py -v
+          mkdir -p output/v12_preview
+          python3 scripts/create_original_score.py --seconds 300 --output output/v12_preview/V12_Original_Stereo_Score.wav
+      - name: Capture ten true C++ snapshots across new timeline
+        shell: bash
+        run: |
+          set -euo pipefail
+          for t in 6 22 44 84 112 132 165 204 253 289 297; do
+            xvfb-run -a -s '-screen 0 1280x720x24' build/bigbang --time "$t" --fps 30 --width 960 --height 540 --output "output/v12_preview/still_${t}s.png"
+          done
+      - name: Render four contiguous two-second formation previews
+        shell: bash
+        run: |
+          set -euo pipefail
+          for t in 125 177 222 286; do
+            first=$(( t * 30 + 1 )); last=$(( first + 59 ))
+            timeout --signal=TERM --kill-after=10s 6m xvfb-run -a -s '-screen 0 1280x720x24' python3 scripts/render_film.py --binary build/bigbang --output-dir "output/v12_preview/clip_${t}" --first-frame "$first" --end-frame "$last" --width 640 --height 360 --fps 30 --chunk-frames 30 --chunk-timeout 145 --preset fast --crf 18
+            cp "output/v12_preview/clip_${t}/film.mp4" "output/v12_preview/formation_${t}s_2sec.mp4"
+          done
+      - name: Create summary and preserve native preview media
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BigBang_V12_True_Native_Formation_Previews
+          path: output/v12_preview/
+          if-no-files-found: warn
+          retention-days: 30
