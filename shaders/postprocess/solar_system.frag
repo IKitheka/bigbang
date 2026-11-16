@@ -1,12 +1,12 @@
 #version 330 core
 // Native GLSL ray-traced Solar System finale, not pre-rendered footage.
 // Orbital distance, planet diameters and orbital velocities are deliberately
-// compressed/exaggerated for educational clarity within a 40-second shot.
+// compressed/exaggerated for clarity within an extended three-minute formation arc.
 // Relative order and broad color/morphology are informed by astronomy.
 // No claim to real-world to-scale distances or simultaneous planet alignment.
 in vec2 TexCoords;
 out vec4 FragColor;
-uniform float uTime,uAspect;
+uniform float uTime,uAspect,uFilmTime;
 
 const float PI=3.141592653589793;
 float hash21(vec2 p) {
@@ -169,7 +169,8 @@ float starLight(vec3 dir) {
 #include "protoplanetary.glsl"
 
 void main() {
-    float t=clamp(uTime,260.0,299.999);
+    float t=clamp(uTime,259.0,299.999);
+    float filmT=clamp(uFilmTime,0.0,299.999);
     float progress=clamp((t-260.0)/40.0,0.0,1.0);
     float dolly=smoothstep(0.0,1.0,progress);
     vec3 earth=orbitPosition(2,t);
@@ -222,10 +223,39 @@ void main() {
         }
     }
 
+    // V12: explicit, world-space planetesimal / embryo growth during the
+    // newly extended formation chapter. These analytic bodies are an
+    // illustration of accretion, not an N-body collision simulator.
+    float debrisWindow=smoothstep(168.0,188.0,filmT)*
+                       (1.0-smoothstep(239.0,264.0,filmT));
+    if(debrisWindow>0.001) {
+        for(int i=0;i<14;++i) {
+            float id=float(i);
+            float a=id*2.39996323+filmT*(0.17/(1.0+id*0.11));
+            float orbit=3.5+mod(id*1.97+0.7,18.0);
+            vec3 center=vec3(orbit*cos(a),orbit*sin(a),
+                             0.17*sin(id*6.12+filmT*0.07));
+            float seed=hash21(vec2(id+11.7,7.3));
+            float radius=(0.11+seed*0.31)*
+                         mix(0.38,1.0,smoothstep(185.0,239.0,filmT))*
+                         debrisWindow;
+            float hit=sphereIntersect(camera,ray,center,radius);
+            if(hit<closest) {
+                closest=hit;object=9;objectCenter=center;objectRadius=radius;
+            }
+        }
+    }
+
     if(object>=0) {
         vec3 surface=camera+ray*closest;
         vec3 n=normalize(surface-objectCenter);
-        if(object==8) {
+        if(object==9) {
+            // Small accreting bodies: muted rock with warm impact-like glow.
+            float lit=max(dot(n,normalize(vec3(-0.3,-0.8,0.6))),0.0);
+            float mottled=fbm3(surface*11.0+vec3(2.7,4.1,6.2));
+            color=mix(vec3(0.25,0.18,0.15),vec3(0.77,0.43,0.19),
+                      0.35+0.65*mottled)*(0.15+0.85*lit);
+        } else if(object==8) {
             float granule=fbm3(surface*7.5+vec3(t*0.02));
             float hot=0.77+0.33*granule;
             float ignition=smoothstep(263.0,276.0,t);
@@ -280,6 +310,7 @@ void main() {
     // three depth layers. Dust cannot shine through an opaque foreground
     // planet or Sun; it remains tied to the world, not the screen.
     color+=v4ProtoplanetaryDisk(camera,ray,t,closest);
+    color+=v12AccretionSeeds(camera,ray,filmT,closest);
 
     // Sun's layered corona and warm lens glow, preserving deep negative
     // space. Glow does not pretend to depict actual sound in space.
@@ -293,6 +324,6 @@ void main() {
 
     // User asked for the solar system at the very end. Crossfade from the
     // dense-galaxy sequence without abruptly replacing a beautiful shot.
-    float cover=smoothstep(259.0,268.0,uTime);
+    float cover=smoothstep(118.0,135.0,filmT);
     FragColor=vec4(max(color,vec3(0.0)),cover);
 }
