@@ -55,10 +55,10 @@ def score(t: np.ndarray, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarr
     # phase/frequency modulation without reinitialising phases per one-second
     # chunk (prevents audible click at audio-chunk boundaries).
     rise = smooth(0.2, 8.0, t)
-    darkness = 1.0 - 0.79 * smooth(173.0, 178.0, t) * (
-        1.0 - smooth(193.0, 201.0, t))
-    late = smooth(194.0, 225.0, t)
-    solar = smooth(257.0, 268.0, t)
+    darkness = 1.0 - 0.79 * smooth(80.0, 83.0, t) * (
+        1.0 - smooth(87.0, 92.0, t))
+    late = smooth(87.0, 105.0, t)
+    solar = smooth(118.0, 150.0, t)
     final_fade = 1.0 - smooth(293.0, 300.0, t)
 
     # Low warm sub-drone + rich slow chorus.
@@ -79,19 +79,19 @@ def score(t: np.ndarray, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarr
 
     # Hot / opaque matter: textured gentle pulse without a literal "space
     # explosion" claim or arbitrary rhythmic jump cuts.
-    matter = smooth(44.0, 58.0, t)*(1.0-smooth(146.0,176.0,t))
+    matter = smooth(35.0, 48.0, t)*(1.0-smooth(70.0,80.0,t))
     pulse = (0.50+0.50*np.cos(2*np.pi*0.28*t))**4
     plasma = matter * pulse * (
         0.045*np.sin(2*np.pi*(41.2*t+0.35*np.sin(t*1.17))) +
         0.023*np.sin(2*np.pi*123.47*t))
 
     # Post-recombination, distant star birth: shimmering stable harmonics.
-    stars = late * (1.0-smooth(259.0,271.0,t))
+    stars = late * (1.0-smooth(115.0,135.0,t))
     air = stars*(0.020*np.sin(2*np.pi*(196.0*t+0.18*np.sin(t*0.17)))+
                  0.012*np.sin(2*np.pi*293.66*t)+
                  0.009*np.sin(2*np.pi*392.00*t))
 
-    # Solar-system resolution in C-major-ish original four-note palette.
+    # V12 extended solar-formation arc in original C-major-ish palette.
     solar_pad = solar * (
         0.043*np.sin(2*np.pi*130.81*t) +
         0.032*np.sin(2*np.pi*196.00*t) +
@@ -101,13 +101,14 @@ def score(t: np.ndarray, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarr
     notes = [261.63,329.63,392.0,523.25,392.0,329.63,440.0,523.25,
              659.25,523.25,392.0,329.63]
     for i,freq in enumerate(notes):
-        melody += bell(t, 265.0+2.3*i, freq, 0.035)
+        melody += bell(t, 145.0+12.4*i, freq, 0.031)
 
     # Original low-frequency impact tones at physically meaningful edits.
     impacts=np.zeros_like(t)
-    for moment,gain in [(6.9,1.35),(50.0,0.48),(82.0,0.27),
-                        (116.0,0.27),(149.0,0.23),
-                        (196.0,0.29),(260.0,0.71),(292.0,0.25)]:
+    for moment,gain in [(6.9,1.35),(35.0,0.38),(50.0,0.25),
+                        (65.0,0.22),(80.0,0.16),(87.0,0.23),
+                        (120.0,0.52),(150.0,0.24),(184.0,0.23),
+                        (215.0,0.27),(260.0,0.32),(292.0,0.26)]:
         impacts += impact(t,moment,gain)
 
     # Wide, soft, per-channel synthesized airflow.
