@@ -42,16 +42,22 @@ void main(){
     float a=dot(d,d),b=dot(o,d),c=dot(o,o)-1.0,det=b*b-a*c;
     if(det<=0.0){FragColor=vec4(0);return;}
     float nearT=max(0.02,(-b-sqrt(det))/a),farT=(-b+sqrt(det))/a;
-    float stepT=max(0.0,farT-nearT)/24.0,trans=1.0;
+    float stepT=max(0.0,farT-nearT)/32.0,trans=1.0;
     vec3 radiance=vec3(0);
-    for(int j=0;j<24;++j){
+    for(int j=0;j<32;++j){
         vec3 p=ro+ray*(nearT+(float(j)+0.5)*stepT);
         float r=length(p.xy),angle=atan(p.y,p.x)-(uFilmTime-118.0)*0.16/pow(1.0+r*0.24,1.5);
         vec3 advected=vec3(r*cos(angle),r*sin(angle),p.z);
+        advected.z+=0.32*sin(r*0.4+angle*2.0+uFilmTime*0.025);
+        float collapse=clamp((uFilmTime-110.0)/35.0,0.0,1.0);
+        collapse=collapse*collapse*collapse*(collapse*(collapse*6.0-15.0)+10.0);
+        advected.xy*=mix(0.88,1.0,collapse);
         float broad=fbm3(advected*0.19+vec3(2.8,7.1,3.4));
         float fine=noise3(advected*1.15+vec3(9.7,1.2,8.6));
-        float density=pow(smoothstep(0.25,0.76,broad),1.5)*
-            (1.0-smoothstep(0.72,1.0,length(p/extent)))*0.13*(0.80+0.20*fine);
+        float folds=exp(-70.0*(broad-0.54)*(broad-0.54));
+        float cloud=0.30*pow(smoothstep(0.34,0.76,broad),2.0)+
+                    0.70*folds*smoothstep(0.38,0.78,fine);
+        float density=cloud*(1.0-smoothstep(0.72,1.0,length(p/extent)))*0.13*(0.80+0.20*fine);
         float illumination=0.25/(1.0+0.055*dot(p,p));
         vec3 scatter=vec3(0.055,0.075,0.105)+vec3(1.85,1.05,0.43)*illumination*
             (0.35+0.65*exp(-density*min(length(p),12.0)*1.8));
