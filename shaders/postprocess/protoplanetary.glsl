@@ -1,149 +1,101 @@
-// NASA / Bob Stanford-inspired scientific visual *interpretation* of the
-// Solar Nebular Hypothesis. World-space, temporally coherent gas/dust shading,
-// NOT a physical SPH, N-body or collisional accretion simulation.
-// Included by solar_system.frag after noise3(), fbm3() and hash21().
-
-float safeGaussian(float x,float width) {
-    float q=x/max(width,0.001);
-    return exp(-q*q);
+// V12.1: deterministic, art-directed solar-nebula evolution in WORLD SPACE.
+// Analytic accretion illustration; no N-body, SPH or collision solver.
+// Included after the shared noise, orbital and ray/sphere functions.
+float v121Ease(float a,float b,float t) {
+    float x=clamp((t-a)/(b-a),0.0,1.0);
+    return x*x*x*(x*(x*6.0-15.0)+10.0);
+}
+float v4PlanetReveal(float ignoredTime,int index) {
+    float delay=float(index)*0.65;
+    return v121Ease(183.0+delay,252.0+delay,uFilmTime);
+}
+vec3 v4YoungPlanetColor(vec3 established,float development,vec3 n,float time) {
+    float scars=fbm3(n*14.0+vec3(2.1,4.1,9.0));
+    float cooling=v121Ease(213.0,259.0,uFilmTime);
+    vec3 rock=mix(vec3(0.17,0.085,0.045),vec3(0.49,0.25,0.11),scars);
+    rock+=vec3(0.58,0.13,0.025)*smoothstep(0.57,0.75,scars)*(1.0-cooling);
+    return mix(rock,established,cooling);
 }
 
-float v4SolarFormationProgress(float t) {
-    return smoothstep(274.0,291.5,t);
-}
-
-// The early dusty molecular cloud resolves into a flattened circumsun disk.
-// Evaluated in world-space, so the cloud and arms do not track the screen.
-vec3 v4NebularEnvelope(vec3 origin,vec3 dir,float t) {
-    float arrival=smoothstep(259.0,263.0,t);
-    float departure=1.0-smoothstep(274.0,285.0,t);
-    float emissionWindow=arrival*departure;
-    if(emissionWindow<0.0001) return vec3(0.0);
-    float nearPoint=max(0.0,dot(-origin,dir));
-    vec3 p=origin+dir*nearPoint;
-    float dist=length(p);
-    float shape=exp(-dist*dist/(20.0*20.0));
-    if(shape<0.002) return vec3(0.0);
-
-    vec3 drift=vec3(t*0.018,-t*0.011,t*0.006);
-    float low=fbm3(p*0.105+vec3(4.7,2.1,1.4)+drift);
-    float fine=fbm3(p*0.29+vec3(-1.3,6.4,2.2)+drift*0.66);
-    float opening=smoothstep(0.28,0.71,low);
-    // Localized blue-grey cavities and warm sunward cloud surfaces.
-    float sunFacing=exp(-length(p.xy)*0.09);
-    vec3 cold=vec3(0.070,0.11,0.19);
-    vec3 warm=vec3(0.42,0.21,0.125);
-    vec3 emission=mix(cold,warm,clamp(0.34+0.70*sunFacing+0.16*fine,0.0,1.0));
-    return emission*shape*emissionWindow*(0.25+1.2*opening)*
-           (0.78+0.45*fine);
-}
-
-// A 3D perspective ray intersects distinct gas/dust sheets parallel to the
-// orbital plane. Annular pressure structures, differential rotation, dark
-// lanes and bright clumps are locally bound to the same orbiting world field.
-// Three sample planes create a thicker medium with finite foreground depth.
-vec3 v4ProtoplanetaryDisk(vec3 origin,vec3 dir,float time,float opaqueDepth) {
-    float condensation=smoothstep(262.0,267.0,time);
-    float clearing=1.0-smoothstep(282.0,295.0,time);
-    float present=condensation*clearing;
-    if(present<0.0001 || abs(dir.z)<0.035) return vec3(0.0);
-
-    vec3 sum=vec3(0.0);
-    for(int layer=0;layer<3;++layer) {
-        float altitude=(float(layer)-1.0)*0.48;
-        float travel=(altitude-origin.z)/dir.z;
-        if(travel<=0.02 || travel>=opaqueDepth) continue;
-        vec3 p=origin+dir*travel;
-        float r=length(p.xy);
-        if(r<1.4 || r>25.0) continue;
-
-        float theta=atan(p.y,p.x);
-        // Differential angular advection, continuous over the entire shot.
-        float rotated=theta-time*(0.055/sqrt(1.2+r*0.21));
-        float turbulence=fbm3(vec3(p.xy*0.24,altitude*0.9)+
-                              vec3(3.7,-1.8,6.1));
-        float granular=noise3(vec3(p.xy*0.83,time*0.005+float(layer)*13.1));
-        float spiral=sin(3.0*rotated-0.45*r+
-                          1.45*(turbulence-0.5));
-        float arm=smoothstep(-0.32,0.74,spiral);
-        float radial=exp(-((r-11.5)/10.2)*((r-11.5)/10.2));
-        radial*=smoothstep(1.35,3.4,r)*
-                (1.0-smoothstep(22.0,25.0,r));
-        // Vary annular density with perturbed narrow gaps.
-        float rings=0.57+0.43*sin(r*1.45+2.9*turbulence+
-                                 rotated*0.75);
-        float dust=radial*(0.15+0.73*arm)*
-                   (0.56+0.44*rings)*
-                   (0.53+0.47*granular);
-
-        // Bright, sparse condensations inside arms hint at planetesimals.
-        // Never claim these are simulated gravitational collisions.
-        vec2 cell=floor(p.xy*0.82);
-        vec2 f=fract(p.xy*0.82);
-        vec2 seed=vec2(hash21(cell+13.4),hash21(cell-8.7));
-        float grain=safeGaussian(length(f-seed),0.13)*
-                    step(0.935,hash21(cell+vec2(7.1,2.4)));
-        float growth=smoothstep(268.0,281.0,time);
-        float sparkle=grain*radial*growth*(0.5+0.5*arm);
-        vec3 cool=vec3(0.22,0.34,0.49);
-        vec3 gold=vec3(0.89,0.56,0.25);
-        vec3 tint=mix(cool,gold,
-                      clamp(0.30+0.51*arm+0.15*turbulence,0.0,1.0));
-        float depthWeight=(layer==1)?0.53:0.32;
-        sum+=present*depthWeight*
-             (tint*dust*0.67+vec3(1.22,0.94,0.63)*sparkle*0.70);
+// A single ellipsoidal medium collapses vertically into a finite-thickness
+// disc. Ray intervals adapt to its thickness, avoiding screen-space sheets.
+// Fixed midpoint samples and advected continuous noise prevent random flicker.
+vec4 v121Medium(vec3 ro,vec3 rd,float filmT,float opaqueDepth) {
+    float clear=1.0-v121Ease(238.0,269.0,filmT);
+    if(clear<0.00001) return vec4(0.0);
+    float flatten=v121Ease(125.0,178.0,filmT);
+    vec3 extent=vec3(26.0,26.0,mix(15.0,1.8,flatten));
+    vec3 o=ro/extent,d=rd/extent;
+    float a=dot(d,d),b=dot(o,d),c=dot(o,o)-1.0;
+    float det=b*b-a*c;
+    if(det<=0.0) return vec4(0.0);
+    float nearT=max(0.02,(-b-sqrt(det))/a);
+    float farT=min(opaqueDepth,(-b+sqrt(det))/a);
+    if(farT<=nearT) return vec4(0.0);
+    const int SAMPLES=32;
+    float stepT=(farT-nearT)/float(SAMPLES);
+    float trans=1.0;
+    vec3 light=vec3(0.0);
+    float ignition=v121Ease(120.0,145.0,filmT);
+    for(int j=0;j<SAMPLES;++j) {
+        vec3 p=ro+rd*(nearT+(float(j)+0.5)*stepT);
+        float r=length(p.xy),theta=atan(p.y,p.x);
+        float angle=theta-(filmT-118.0)*0.16/pow(1.0+r*0.24,1.5);
+        vec3 advected=vec3(r*cos(angle),r*sin(angle),p.z);
+        advected.z+=0.32*sin(r*0.4+angle*2.0+filmT*0.025);
+        advected.xy*=mix(0.88,1.0,v121Ease(110.0,145.0,filmT));
+        float broad=fbm3(advected*0.19+vec3(2.8,7.1,3.4));
+        float fine=noise3(advected*1.15+vec3(9.7,1.2,8.6));
+        float boundary=1.0-smoothstep(0.72,1.0,length(p/extent));
+        float folds=exp(-70.0*(broad-0.54)*(broad-0.54));
+        float cloud=(0.30*pow(smoothstep(0.34,0.76,broad),2.0)+
+            0.70*folds*smoothstep(0.38,0.78,fine))*boundary;
+        float lane=0.48+0.52*smoothstep(-0.45,0.6,
+                       sin(r*1.3+3.5*broad));
+        float spiral=0.76+0.24*sin(2.0*angle-r*0.37+2.0*broad);
+        float vertical=exp(-p.z*p.z/(0.32+0.014*r*r));
+        float disc=boundary*vertical*lane*spiral*(0.3+0.7*broad);
+        disc*=smoothstep(1.35,2.5,r);
+        float density=mix(cloud*0.13,disc*0.40,flatten)*(0.80+0.20*fine);
+        // Same eight world-space centres become the solid embryos below.
+        float seeds=v121Ease(155.0,193.0,filmT)*(1.0-v121Ease(239.0,262.0,filmT));
+        if(seeds>0.001) {
+            for(int k=0;k<8;++k) {
+                float development=v4PlanetReveal(0.0,k);
+                vec3 delta=p-orbitPosition(k,filmT);
+                float width=mix(1.25,planetBodyRadius(k)*1.12,development);
+                density+=seeds*0.21*exp(-dot(delta,delta)/(width*width));
+            }
+        }
+        density*=clear;
+        float sunDistance=length(p);
+        float illumination=(0.25+0.75*ignition)/(1.0+0.055*sunDistance*sunDistance);
+        float selfShadow=exp(-density*min(sunDistance,12.0)*1.8);
+        vec3 scattering=vec3(0.055,0.075,0.105)+
+            vec3(1.85,1.05,0.43)*illumination*(0.35+0.65*selfShadow);
+        float alpha=1.0-exp(-density*stepT);
+        light+=trans*scattering*alpha;
+        trans*=1.0-alpha;
+        if(trans<0.012) break;
     }
-    return sum;
+    return vec4(light,1.0-trans);
 }
 
-// Young circumstellar clouds condense into rocky protoplanets. World
-// positions are the same as in the final established orbital system; only
-// radii and colors evolve, so no objects suddenly appear at new positions.
-float v4PlanetReveal(float time,int planetIndex) {
-    float delay=0.70*float(planetIndex);
-    return smoothstep(271.5+delay,286.0+delay*0.55,time);
-}
-
-vec3 v4YoungPlanetColor(vec3 established,float development,
-                        vec3 surfaceNormal,float time) {
-    float scars=fbm3(surfaceNormal*14.0+
-                     vec3(time*0.012,4.1,9.0));
-    vec3 molten=mix(vec3(0.31,0.085,0.036),
-                    vec3(1.25,0.44,0.09),
-                    smoothstep(0.37,0.80,scars));
-    return mix(molten,established,smoothstep(0.28,0.95,development));
-}
-
-
-// V12: evolving clumps in a flattened disk. The bodies are procedurally
-// located in WORLD SPACE; the effect is neither a screen HUD nor an
-// accurate collisional simulation. The youngest dust grains precede the
-// explicit ray-sphere planetesimals in solar_system.frag.
-vec3 v12AccretionSeeds(vec3 origin,vec3 dir,float filmT,float opaqueDepth) {
-    float activity=smoothstep(149.0,173.0,filmT)*
-                   (1.0-smoothstep(245.0,269.0,filmT));
-    if(activity<0.0001 || abs(dir.z)<0.025) return vec3(0.0);
-    vec3 glow=vec3(0.0);
-    for(int layer=0;layer<2;++layer) {
-        float planeZ=(float(layer)-0.5)*0.48;
-        float travel=(planeZ-origin.z)/dir.z;
-        if(travel<=0.02 || travel>=opaqueDepth) continue;
-        vec3 p=origin+travel*dir;
-        float r=length(p.xy);
-        if(r<2.0 || r>22.0) continue;
-        vec2 cell=floor(p.xy*0.64);
-        vec2 local=fract(p.xy*0.64);
-        vec2 center=vec2(hash21(cell+vec2(13.2,7.7)),
-                         hash21(cell+vec2(6.9,21.1)));
-        float d=length(local-center);
-        float seed=hash21(cell+vec2(3.4,9.8));
-        float grain=exp(-d*d*170.0)*step(0.68,seed);
-        float band=0.45+0.55*sin(r*0.85+filmT*0.004);
-        float growth=smoothstep(177.0,222.0,filmT);
-        vec3 cool=vec3(0.30,0.40,0.52);
-        vec3 hot=vec3(1.10,0.68,0.31);
-        vec3 tint=mix(cool,hot,0.35+0.65*growth);
-        glow+=tint*grain*activity*(0.30+0.70*band)*0.86;
-    }
-    return glow;
+// C2 ease between deliberate compositions. Absolute film time drives both
+// camera and orbital objects, independent of capture chunks and mapped epochs.
+void v121Camera(float filmT,vec3 earth,vec3 jupiter,out vec3 camera,out vec3 target) {
+    vec3 a=vec3(10.0,-56.0,28.0),b=vec3(10.0,-36.0,17.0);
+    vec3 ta=vec3(0.0),tb=vec3(0.0);
+    float lo=118.0,hi=145.0;
+    if(filmT>=145.0) {a=b;b=vec3(5.0,-22.0,10.0);lo=145.0;hi=180.0;}
+    if(filmT>=180.0) {a=b;b=jupiter+vec3(5.0,-12.0,6.0);tb=jupiter*0.85;lo=180.0;hi=215.0;}
+    if(filmT>=215.0) {a=jupiter+vec3(5.0,-12.0,6.0);b=vec3(10.0,-32.0,18.0);ta=jupiter*0.85;tb=vec3(0.0);lo=215.0;hi=245.0;}
+    if(filmT>=245.0) {a=b;b=vec3(18.0,-44.0,23.0);ta=vec3(0.0);lo=245.0;hi=265.0;}
+    if(filmT>=265.0) {a=vec3(18.0,-44.0,23.0);b=a;ta=vec3(0.0);lo=265.0;hi=283.0;}
+    if(filmT>=283.0) {a=vec3(18.0,-44.0,23.0);// Frame Earth from its illuminated hemisphere, but keep Saturn's
+    // apparent position well outside the globe during the final seconds.
+    // This is a continuous endpoint change for the existing C2 camera move.
+    b=earth+normalize(-earth)*0.95+vec3(-1.0,-0.5,1.0);ta=vec3(0.0);tb=earth*0.995;lo=283.0;hi=300.0;}
+    float e=v121Ease(lo,hi,filmT);
+    camera=mix(a,b,e);target=mix(ta,tb,e);
 }

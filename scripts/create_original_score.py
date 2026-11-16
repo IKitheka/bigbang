@@ -58,7 +58,7 @@ def score(t: np.ndarray, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarr
     darkness = 1.0 - 0.79 * smooth(80.0, 83.0, t) * (
         1.0 - smooth(87.0, 92.0, t))
     late = smooth(87.0, 105.0, t)
-    solar = smooth(118.0, 150.0, t)
+    solar = smooth(113.0, 144.0, t)
     final_fade = 1.0 - smooth(293.0, 300.0, t)
 
     # Low warm sub-drone + rich slow chorus.
@@ -103,12 +103,20 @@ def score(t: np.ndarray, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarr
     for i,freq in enumerate(notes):
         melody += bell(t, 145.0+12.4*i, freq, 0.031)
 
-    # Original low-frequency impact tones at physically meaningful edits.
+    # Original quiet granular tones accumulate with the visible clumps.
+    accretion = np.zeros_like(t)
+    for i in range(13):
+        accretion += bell(t, 178.0+5.2*i, 392.0+29.0*(i%5), 0.008)
+    build = smooth(112.0,132.0,t)*(1.0-smooth(140.0,153.0,t))
+    accretion += build*0.018*np.sin(2*np.pi*(98.0*t+0.05*t*t))
+    # Gentle resolution begins with the actual 283-second Earth camera move.
+    resolution = bell(t,283.0,261.63,0.032)+bell(t,286.0,329.63,0.027)+bell(t,289.0,392.0,0.023)
+    # Low-frequency musical accents follow cinematic formation milestones.
     impacts=np.zeros_like(t)
     for moment,gain in [(6.9,1.35),(35.0,0.38),(50.0,0.25),
                         (65.0,0.22),(80.0,0.16),(87.0,0.23),
-                        (120.0,0.52),(150.0,0.24),(184.0,0.23),
-                        (215.0,0.27),(260.0,0.32),(292.0,0.26)]:
+                        (132.0,0.40),(145.0,0.18),(184.0,0.16),
+                        (215.0,0.18),(250.0,0.22),(283.0,0.18)]:
         impacts += impact(t,moment,gain)
 
     # Wide, soft, per-channel synthesized airflow.
@@ -118,7 +126,7 @@ def score(t: np.ndarray, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarr
     left_noise=rng.standard_normal(t.shape)*noise_amp
     right_noise=rng.standard_normal(t.shape)*noise_amp
 
-    centered=(drone+origin+sweep+plasma+air+solar_pad+melody+impacts)*final_fade
+    centered=(drone+origin+sweep+plasma+air+solar_pad+melody+impacts+accretion+resolution)*final_fade
     stereo_motion=0.08*np.sin(2*np.pi*0.034*t)
     left=centered*(1.0+stereo_motion)+left_noise
     right=centered*(1.0-stereo_motion)+right_noise
