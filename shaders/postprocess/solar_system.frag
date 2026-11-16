@@ -184,6 +184,21 @@ void main() {
     vec3 closeCamera=earth+vec3(0.70,-2.8,1.35);
     vec3 camera=mix(wideCamera,closeCamera,fly);
     vec3 target=mix(vec3(0.0),earth,fly*0.995);
+    // V12: two deliberate camera chapters break the original 40-second
+    // finale into distinct planet-formation shots. Return to the approved
+    // wide-to-Earth composition before the concluding close-up.
+    float diskFocus=smoothstep(167.0,191.0,filmT)*
+                    (1.0-smoothstep(213.0,232.0,filmT));
+    vec3 diskCamera=vec3(9.5,-27.5,13.5);
+    camera=mix(camera,diskCamera,diskFocus*0.85);
+    target=mix(target,vec3(0.0),diskFocus*0.70);
+
+    float embryoFocus=smoothstep(222.0,238.0,filmT)*
+                      (1.0-smoothstep(256.0,272.0,filmT));
+    vec3 youngJupiter=orbitPosition(4,t);
+    vec3 embryoCamera=youngJupiter+vec3(7.0,-14.0,8.0);
+    camera=mix(camera,embryoCamera,embryoFocus*0.82);
+    target=mix(target,youngJupiter,embryoFocus*0.82);
     vec3 forward=normalize(target-camera);
     vec3 right=normalize(cross(forward,vec3(0.0,0.0,1.0)));
     vec3 up=normalize(cross(right,forward));
@@ -236,7 +251,7 @@ void main() {
             vec3 center=vec3(orbit*cos(a),orbit*sin(a),
                              0.17*sin(id*6.12+filmT*0.07));
             float seed=hash21(vec2(id+11.7,7.3));
-            float radius=(0.11+seed*0.31)*
+            float radius=(0.16+seed*0.42)*
                          mix(0.38,1.0,smoothstep(185.0,239.0,filmT))*
                          debrisWindow;
             float hit=sphereIntersect(camera,ray,center,radius);
