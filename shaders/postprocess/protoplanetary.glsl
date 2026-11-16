@@ -32,7 +32,7 @@ vec4 v121Medium(vec3 ro,vec3 rd,float filmT,float opaqueDepth) {
     float nearT=max(0.02,(-b-sqrt(det))/a);
     float farT=min(opaqueDepth,(-b+sqrt(det))/a);
     if(farT<=nearT) return vec4(0.0);
-    const int SAMPLES=24;
+    const int SAMPLES=32;
     float stepT=(farT-nearT)/float(SAMPLES);
     float trans=1.0;
     vec3 light=vec3(0.0);
@@ -42,12 +42,16 @@ vec4 v121Medium(vec3 ro,vec3 rd,float filmT,float opaqueDepth) {
         float r=length(p.xy),theta=atan(p.y,p.x);
         float angle=theta-(filmT-118.0)*0.16/pow(1.0+r*0.24,1.5);
         vec3 advected=vec3(r*cos(angle),r*sin(angle),p.z);
+        advected.z+=0.32*sin(r*0.4+angle*2.0+filmT*0.025);
+        advected.xy*=mix(0.88,1.0,v121Ease(110.0,145.0,filmT));
         float broad=fbm3(advected*0.19+vec3(2.8,7.1,3.4));
         float fine=noise3(advected*1.15+vec3(9.7,1.2,8.6));
         float boundary=1.0-smoothstep(0.72,1.0,length(p/extent));
-        float cloud=pow(smoothstep(0.25,0.76,broad),1.5)*boundary;
-        float lane=0.32+0.68*smoothstep(-0.45,0.6,
-                       sin(r*2.0+1.7*broad));
+        float folds=exp(-70.0*(broad-0.54)*(broad-0.54));
+        float cloud=(0.30*pow(smoothstep(0.34,0.76,broad),2.0)+
+            0.70*folds*smoothstep(0.38,0.78,fine))*boundary;
+        float lane=0.48+0.52*smoothstep(-0.45,0.6,
+                       sin(r*1.3+3.5*broad));
         float spiral=0.76+0.24*sin(2.0*angle-r*0.37+2.0*broad);
         float vertical=exp(-p.z*p.z/(0.32+0.014*r*r));
         float disc=boundary*vertical*lane*spiral*(0.3+0.7*broad);
