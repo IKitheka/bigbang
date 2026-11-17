@@ -112,12 +112,18 @@ vec3 v123Knot(int k,float filmT,bool forCamera) {
     float distance=(id==5) ? radius*4.3+0.85 :
                              radius*1.65+0.38;
     float lateral=0.10;
+    float inward=1.0;
+    float elevation=0.23;
+    // Mercury's former inward camera nearly touched the Sun. Move the
+    // portrait laterally over the lit terminator and above the orbital plane
+    // to preserve the planet while avoiding a blinding solar close pass.
+    if(id==0) { distance=1.12; lateral=0.90; inward=0.20; elevation=0.50; }
     // Earth is not an inert freeze-frame: glide across the illuminated face
     // and gently get closer through the final frame.
     if(k==9) { distance=2.10; lateral=0.42; }
     if(k==10){ distance=1.35; lateral=0.67; }
-    return planet+sunward*distance+side*(lateral*distance)+
-           vec3(0.0,0.0,0.23*distance);
+    return planet+sunward*(inward*distance)+side*(lateral*distance)+
+           vec3(0.0,0.0,elevation*distance);
 }
 vec3 v123KnotVelocity(int k,float filmT,bool forCamera) {
     if(k==0) return vec3(0.0); // match the preceding formation shot
@@ -196,6 +202,8 @@ void v121Camera(float filmT,vec3 earth,vec3 jupiter,
     // pass safely above the inner solar plane instead of tunnelling through
     // the Sun. sin^4 has zero value, slope and curvature at both endpoints.
     float arc=sin(3.141592653589793*u);
-    float lift=(segment==1 || segment==2) ? 3.10 : 2.00;
+    // A higher arc through the inner-system transfers avoids a near-Sun
+    // graze without pausing the shot, and still eases in/out at C2 order.
+    float lift=(segment<=2) ? 8.00 : 2.00;
     camera.z+=lift*arc*arc*arc*arc;
 }
