@@ -82,10 +82,76 @@ vec4 v121Medium(vec3 ro,vec3 rd,float filmT,float opaqueDepth) {
     return vec4(light,1.0-trans);
 }
 
-// V12.2 — Planet portraits. Keep a common wide, star-centred camera between
-// every close-up. Each approach uses C2 quintic ease and retracts to that same
-// wide camera, so changing the planet index cannot create a cut or a jump.
-// The same orbitPosition(index, filmT) drives both the visible planet and camera.
+// V12.3 — One unbroken, cinematic planet-to-planet camera flight.
+// No selecting a new portrait / returning to wide / resting at each planet.
+// World-space camera + look-at both use the same C2 quintic Hermite path.
+// Velocities are shared across both sides of every knot and never zero at a
+// planetary pass; both endpoint accelerations are zero, keeping transitions
+// C2 even as analytic orbitPosition continues moving every planet each frame.
+// Absolute film seconds are deterministic: seeking/splitting is frame exact.
+const int V123_KNOTS=11;
+const float v123Times[11]=float[11](
+    185.0,195.0,205.0,216.0,227.0,239.0,250.0,261.0,
+    274.0,290.0,299.999
+);
+const int v123Ids[11]=int[11](
+    -1,0,1,3,4,5,6,7,-1,2,2
+);
+vec3 v123Knot(int k,float filmT,bool forCamera) {
+    // Wide entrances exist only at the start and at the single whole-system
+    // reveal; there is NO wide reset between any individual planets.
+    if(k==0 || k==8)
+        return forCamera ? vec3(18.0,-44.0,23.0) : vec3(0.0);
+
+    int id=v123Ids[k];
+    vec3 planet=orbitPosition(id,filmT);
+    if(!forCamera) return planet*0.995;
+    vec3 sunward=normalize(-planet);
+    vec3 side=normalize(vec3(-sunward.y,sunward.x,0.0));
+    float radius=planetBodyRadius(id);
+    float distance=(id==5) ? radius*4.3+0.85 :
+                             radius*1.65+0.38;
+    float lateral=0.10;
+    // Earth is not an inert freeze-frame: glide across the illuminated face
+    // and gently get closer through the final frame.
+    if(k==9) { distance=2.10; lateral=0.42; }
+    if(k==10){ distance=1.35; lateral=0.67; }
+    return planet+sunward*distance+side*(lateral*distance)+
+           vec3(0.0,0.0,0.23*distance);
+}
+vec3 v123KnotVelocity(int k,float filmT,bool forCamera) {
+    if(k==0) return vec3(0.0); // match the preceding formation shot
+    if(k==V123_KNOTS-1) {
+        return 0.50*(v123Knot(k,filmT,forCamera)-
+                     v123Knot(k-1,filmT,forCamera))/
+                     (v123Times[k]-v123Times[k-1]);
+    }
+    vec3 velocity=0.62*(v123Knot(k+1,filmT,forCamera)-
+                        v123Knot(k-1,filmT,forCamera))/
+                        (v123Times[k+1]-v123Times[k-1]);
+    // Equal-distance neighbour centres can cancel a finite difference and
+    // make a camera appear parked. Keep a tangible lateral flyby velocity
+    // for each planetary waypoint, independent of its orbital velocity.
+    if(forCamera && k>0 && k<8 && length(velocity)<0.95) {
+        vec3 planet=orbitPosition(v123Ids[k],filmT);
+        vec3 sideways=normalize(vec3(-planet.y,planet.x,0.0));
+        velocity=normalize(velocity+0.28*sideways)*0.95;
+    }
+    return velocity;
+}
+// Quintic Hermite: endpoint position/velocity matched, acceleration zero at
+// each shared knot. With moving orbit centres, camera and target retain C2
+// continuity because both segments evaluate the same knot functions at filmT.
+vec3 v123SmoothFlight(vec3 p0,vec3 p1,vec3 v0,vec3 v1,
+                      float duration,float u) {
+    vec3 delta=p1-p0;
+    vec3 d0=v0*duration,d1=v1*duration;
+    float u2=u*u,u3=u2*u,u4=u3*u,u5=u4*u;
+    return p0+d0*u+
+           (10.0*delta-6.0*d0-4.0*d1)*u3+
+           (-15.0*delta+8.0*d0+7.0*d1)*u4+
+           (6.0*delta-3.0*d0-3.0*d1)*u5;
+}
 void v121Camera(float filmT,vec3 earth,vec3 jupiter,
                 out vec3 camera,out vec3 target) {
     vec3 farCloud=vec3(10.0,-56.0,28.0);
@@ -94,52 +160,42 @@ void v121Camera(float filmT,vec3 earth,vec3 jupiter,
     vec3 wide=vec3(18.0,-44.0,23.0);
     camera=farCloud;
     target=vec3(0.0);
-
     if(filmT<138.0) {
         camera=mix(farCloud,discView,v121Ease(110.0,138.0,filmT));
-    } else if(filmT<160.0) {
-        camera=mix(discView,accretionView,v121Ease(138.0,160.0,filmT));
-    } else if(filmT<185.0) {
-        camera=mix(accretionView,wide,v121Ease(160.0,185.0,filmT));
-    } else if(filmT<271.0) {
-        // Mercury, Venus, Mars, Jupiter, Saturn, Uranus, Neptune.
-        // Earth retains its 17-second hero close-up at the end.
-        int selected=0;
-        float begin=185.0, finish=197.0;
-        if(filmT>=197.0) {selected=1;begin=197.0;finish=209.0;}
-        if(filmT>=209.0) {selected=3;begin=209.0;finish=221.0;}
-        if(filmT>=221.0) {selected=4;begin=221.0;finish=234.0;}
-        if(filmT>=234.0) {selected=5;begin=234.0;finish=247.0;}
-        if(filmT>=247.0) {selected=6;begin=247.0;finish=259.0;}
-        if(filmT>=259.0) {selected=7;begin=259.0;finish=271.0;}
-        vec3 planet=orbitPosition(selected,filmT);
-        vec3 sunward=normalize(-planet);
-        vec3 side=normalize(vec3(-sunward.y,sunward.x,0.0));
-        float radius=planetBodyRadius(selected);
-        // Saturn's complete rings must fit, not just the planet sphere.
-        float viewingDistance=(selected==5) ? radius*4.3+0.85 :
-                              radius*1.65+0.38;
-        vec3 portraitCamera=planet+sunward*viewingDistance+
-                            side*(0.10*viewingDistance)+
-                            vec3(0.0,0.0,0.23*viewingDistance);
-        float approach=v121Ease(begin,begin+3.5,filmT);
-        float depart=1.0-v121Ease(finish-3.0,finish,filmT);
-        float focus=approach*depart;
-        camera=mix(wide,portraitCamera,focus);
-        // A small elevation arc makes the move feel cinematic, not a cut.
-        camera.z+=3.0*sin(3.141592653589793*focus);
-        target=mix(vec3(0.0),planet*0.995,focus);
-    } else if(filmT<283.0) {
-        // The uninterrupted full system reveal returns to precisely wide.
-        float phase=v121Ease(271.0,283.0,filmT);
-        camera=wide+vec3(-3.0,3.0,1.2)*
-                      sin(3.141592653589793*phase)*
-                      sin(3.141592653589793*phase);
-    } else {
-        // Preserve the V12.1 illuminated Earth composition and Saturn separation.
-        vec3 closeEarth=earth+normalize(-earth)*0.95+vec3(-1.0,-0.5,1.0);
-        float focus=v121Ease(283.0,300.0,filmT);
-        camera=mix(wide,closeEarth,focus);
-        target=mix(vec3(0.0),earth*0.995,focus);
+        return;
     }
+    if(filmT<160.0) {
+        camera=mix(discView,accretionView,v121Ease(138.0,160.0,filmT));
+        return;
+    }
+    if(filmT<185.0) {
+        camera=mix(accretionView,wide,v121Ease(160.0,185.0,filmT));
+        return;
+    }
+
+    int segment=V123_KNOTS-2;
+    for(int k=0;k<V123_KNOTS-1;++k) {
+        if(filmT<v123Times[k+1]) {
+            segment=k;
+            break;
+        }
+    }
+    float duration=v123Times[segment+1]-v123Times[segment];
+    float u=clamp((filmT-v123Times[segment])/duration,0.0,1.0);
+    camera=v123SmoothFlight(
+        v123Knot(segment,filmT,true),
+        v123Knot(segment+1,filmT,true),
+        v123KnotVelocity(segment,filmT,true),
+        v123KnotVelocity(segment+1,filmT,true),duration,u);
+    target=v123SmoothFlight(
+        v123Knot(segment,filmT,false),
+        v123Knot(segment+1,filmT,false),
+        v123KnotVelocity(segment,filmT,false),
+        v123KnotVelocity(segment+1,filmT,false),duration,u);
+    // A subtle elevated transfer between planets makes the full trajectory
+    // pass safely above the inner solar plane instead of tunnelling through
+    // the Sun. sin^4 has zero value, slope and curvature at both endpoints.
+    float arc=sin(3.141592653589793*u);
+    float lift=(segment==1 || segment==2) ? 3.10 : 2.00;
+    camera.z+=lift*arc*arc*arc*arc;
 }
