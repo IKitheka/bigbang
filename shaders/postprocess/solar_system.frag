@@ -197,7 +197,7 @@ void main() {
     float closest=1.0e20;
     int object=-1;
     vec3 objectCenter=vec3(0.0);
-    float sunRadius=mix(0.62,1.42,v121Ease(118.0,145.0,filmT));
+    float sunRadius=mix(0.62,1.42,v121Ease(118.0,138.0,filmT));
     float objectRadius=sunRadius;
     float sunHit=sphereIntersect(camera,ray,vec3(0.0),sunRadius);
     if(sunHit<closest) {
@@ -216,14 +216,14 @@ void main() {
         }
     }
 
-    // V12: explicit, world-space planetesimal / embryo growth during the
-    // newly extended formation chapter. These analytic bodies are an
-    // illustration of accretion, not an N-body collision simulator.
-    float debrisWindow=v121Ease(167.0,190.0,filmT)*(1.0-v121Ease(232.0,257.0,filmT));
+    // V12.2: shorten the dusty accretion segment and clear the environment
+    // before the individual planetary close-ups. These are analytic bodies,
+    // not an N-body simulation. They remain bound to parent orbital locations.
+    float debrisWindow=v121Ease(143.0,157.0,filmT)*(1.0-v121Ease(176.0,190.0,filmT));
     if(debrisWindow>0.0001) {
         for(int i=0;i<24;++i) {
             int parent=i%8;
-            float id=float(i),growth=v121Ease(180.0,239.0,filmT);
+            float id=float(i),growth=v121Ease(155.0,185.0,filmT);
             float angle=id*2.39996323+filmT*(0.11/(1.0+id*0.08));
             float orbit=mix(1.7,0.22,growth)*(0.7+0.3*hash21(vec2(id,4.2)));
             vec3 center=orbitPosition(parent,filmT)+
@@ -249,7 +249,7 @@ void main() {
             float hot=0.35+1.0*smoothstep(0.25,0.75,granule);
             float limb=0.50+0.50*sqrt(max(dot(n,-ray),0.0));
             float spots=smoothstep(0.66,0.78,noise3(n*6.0+vec3(1.7,4.2,filmT*0.003)));
-            float ignition=v121Ease(120.0,145.0,filmT);
+            float ignition=v121Ease(118.0,138.0,filmT);
             vec3 protostar=vec3(0.52,0.19,0.065)*(0.72+0.45*granule);
             vec3 mature=vec3(1.8,1.35,0.94)*hot*limb*(1.0-0.50*spots);
             color=mix(protostar,mature,ignition);
@@ -296,7 +296,7 @@ void main() {
                 float gap=1.0-0.88*smoothstep(1.71,1.74,frac)*(1.0-smoothstep(1.79,1.82,frac));
                 vec3 tint=mix(vec3(0.36,0.25,0.15),
                               vec3(0.84,0.71,0.46),strip);
-                float ringsBorn=v121Ease(239.0,266.0,filmT);
+                float ringsBorn=v121Ease(182.0,229.0,filmT);
                 color=mix(color,tint*(0.12+0.88*light)*shadow,
                           edge*gap*(0.42+0.40*strip)*ringsBorn);
             }
@@ -318,7 +318,7 @@ void main() {
                0.10*exp(-angularDistance/max(angularRadius*0.85,0.001));
     float forwardLight=smoothstep(0.0,0.35,dot(normalize(toSun),ray));
     float glowMask=(object<0) ? forwardLight : 0.0;
-    float sunIgnition=v121Ease(120.0,145.0,filmT);
+    float sunIgnition=v121Ease(118.0,138.0,filmT);
     color+=vec3(1.0,0.40,0.10)*halo*glowMask*(1.0-medium.a)*(0.18+0.82*sunIgnition);
 
     // User asked for the solar system at the very end. Crossfade from the

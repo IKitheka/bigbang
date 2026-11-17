@@ -106,9 +106,14 @@ def score(t: np.ndarray, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarr
     # Original quiet granular tones accumulate with the visible clumps.
     accretion = np.zeros_like(t)
     for i in range(13):
-        accretion += bell(t, 178.0+5.2*i, 392.0+29.0*(i%5), 0.008)
+        accretion += bell(t, 145.0+2.7*i, 392.0+29.0*(i%5), 0.008)
     build = smooth(112.0,132.0,t)*(1.0-smooth(140.0,153.0,t))
     accretion += build*0.018*np.sin(2*np.pi*(98.0*t+0.05*t*t))
+    # Seven short musical motifs follow Mercury, Venus, Mars, Jupiter,
+    # Saturn, Uranus and Neptune; the existing Earth resolution is retained.
+    for cue,freq in zip([190.5,202.5,214.5,227.0,240.0,253.0,265.0],
+                        [523.25,440.0,392.0,261.63,329.63,440.0,392.0]):
+        melody += bell(t,cue,freq,0.013)
     # Gentle resolution begins with the actual 283-second Earth camera move.
     resolution = bell(t,283.0,261.63,0.032)+bell(t,286.0,329.63,0.027)+bell(t,289.0,392.0,0.023)
     # Low-frequency musical accents follow cinematic formation milestones.
@@ -116,7 +121,8 @@ def score(t: np.ndarray, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarr
     for moment,gain in [(6.9,1.35),(35.0,0.38),(50.0,0.25),
                         (65.0,0.22),(80.0,0.16),(87.0,0.23),
                         (132.0,0.40),(145.0,0.18),(184.0,0.16),
-                        (215.0,0.18),(250.0,0.22),(283.0,0.18)]:
+                        (197.0,0.12),(221.0,0.14),(234.0,0.13),
+                        (259.0,0.11),(283.0,0.18)]:
         impacts += impact(t,moment,gain)
 
     # Wide, soft, per-channel synthesized airflow.

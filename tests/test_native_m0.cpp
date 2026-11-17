@@ -108,15 +108,27 @@ int main() {
         assert(current>=previous-0.0001f);
         previous=current;
     }
-    assert(cinematic::solarSceneTime(117.0f)==259.0f);
-    assert(std::abs(cinematic::solarSceneTime(118.0f)-259.0f)<.001f);
-    assert(std::abs(cinematic::solarSceneTime(145.0f)-264.0f)<.001f);
-    assert(std::abs(cinematic::solarSceneTime(180.0f)-268.0f)<.001f);
-    assert(std::abs(cinematic::solarSceneTime(215.0f)-273.0f)<.001f);
-    assert(std::abs(cinematic::solarSceneTime(245.0f)-278.0f)<.001f);
-    assert(std::abs(cinematic::solarSceneTime(265.0f)-285.0f)<.001f);
-    assert(std::abs(cinematic::solarSceneTime(283.0f)-290.0f)<.001f);
-    assert(std::abs(cinematic::solarSceneTime(291.0f)-294.0f)<.001f);
+    assert(std::abs(cinematic::solarSceneTime(110.0f)-259.0f)<.001f);
+    assert(std::abs(cinematic::solarSceneTime(138.0f)-264.0f)<.001f);
+    assert(std::abs(cinematic::solarSceneTime(160.0f)-272.0f)<.001f);
+    assert(std::abs(cinematic::solarSceneTime(185.0f)-283.0f)<.001f);
+    assert(std::abs(cinematic::solarSceneTime(271.0f)-292.0f)<.001f);
+    assert(std::abs(cinematic::solarSceneTime(283.0f)-295.0f)<.001f);
+    assert(std::abs(cinematic::solarSceneTime(299.999f)-299.999f)<.001f);
+    // Seven non-overlapping planet portraits and a separate Earth finale.
+    const int planetIndices[8]={0,1,3,4,5,6,7,2};
+    for(int i=0;i<8;++i) {
+        const auto& flyby=cinematic::kPlanetFlybys[i];
+        assert(flyby.shaderPlanetIndex==planetIndices[i]);
+        assert(flyby.startSecond<flyby.endSecond);
+        if(i>0 && i<7)
+            assert(std::abs(flyby.startSecond-
+                   cinematic::kPlanetFlybys[i-1].endSecond)<.0001f);
+    }
+    assert(cinematic::kPlanetFlybys[0].startSecond==185.0f);
+    assert(cinematic::kPlanetFlybys[6].endSecond==271.0f);
+    assert(cinematic::kPlanetFlybys[7].startSecond==283.0f);
+    assert(cinematic::kPlanetFlybys[7].endSecond==300.0f);
     previous=0.0f;
     for(int frame=0;frame<9000;++frame) {
         const float at=float(frame)/30.0f;
