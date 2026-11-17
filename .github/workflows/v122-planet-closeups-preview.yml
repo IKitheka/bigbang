@@ -1,5 +1,7 @@
 name: V12.2 native individual planet close-ups and three-minute formation preview
 on:
+  pull_request:
+    paths: ['src/**', 'include/**', 'shaders/**', 'scripts/v122_previews.py', 'scripts/create_original_score.py', 'tests/**', '.github/workflows/v122-planet-closeups-preview.yml']
   push:
     branches: [feature/v12-2-planet-closeups]
     paths: ['src/**', 'include/**', 'shaders/**', 'scripts/v122_previews.py', 'scripts/create_original_score.py', 'tests/**', '.github/workflows/v122-planetary-preview.yml']
