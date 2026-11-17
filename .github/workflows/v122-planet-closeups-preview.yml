@@ -1,0 +1,219 @@
+name: V12.2 native individual planet close-ups and three-minute formation preview
+on:
+  push:
+    branches: [feature/v12-2-planet-closeups]
+    paths: ['src/**', 'include/**', 'shaders/**', 'scripts/v122_previews.py', 'scripts/create_original_score.py', 'tests/**', '.github/workflows/v122-planetary-preview.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: v122-preview-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  LIBGL_ALWAYS_SOFTWARE: '1'
+  GALLIUM_DRIVER: llvmpipe
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - name: Install native build and audiovisual tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y build-essential cmake git libglfw3-dev libglm-dev libgl1-mesa-dev libgl1-mesa-dri xvfb xauth ffmpeg python3-numpy python3-yaml
+      - name: Compile, run regressions and execute real GLSL determinism probes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output/v122_shared
+          python3 -m py_compile scripts/v122_previews.py scripts/create_original_score.py
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release 2>&1 | tee output/v122_shared/configure.log
+          cmake --build build --parallel 2 2>&1 | tee output/v122_shared/build.log
+          ctest --test-dir build --output-on-failure 2>&1 | tee output/v122_shared/ctest.log
+          python3 -m unittest discover -s tests -p test_film_render.py -v 2>&1 | tee output/v122_shared/python-tests.log
+          python3 scripts/v122_previews.py preflight 2>&1 | tee output/v122_shared/preflight.log
+          xvfb-run -a build/bigbang --renderer-info > output/v122_shared/Renderer.txt
+          cat output/v122_shared/Preflight.json >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: v122-toolchain
+          path: |
+            build/bigbang
+            output/v122_shared/
+          retention-days: 90
+          overwrite: true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with: {name: v122-preflight-failure, path: output/v122_shared/, retention-days: 90}
+  transitions:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        id: [mercury, venus, mars, jupiter, saturn, uranus, neptune, wide_system, earth]
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - name: Install render runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libglfw3 libgl1-mesa-dri xvfb xauth ffmpeg python3-numpy
+      - uses: actions/download-artifact@v4
+        with: {name: v122-toolchain, path: .}
+      - name: Render 360 consecutive native frames with original stereo audio
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x build/bigbang
+          python3 scripts/v122_previews.py transition --id '${{ matrix.id }}'
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: V12_2_${{ matrix.id }}
+          path: output/v122/
+          retention-days: 90
+          overwrite: true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v122-native-transition-${{ matrix.id }}
+          path: output/native_${{ matrix.id }}/
+          if-no-files-found: warn
+          retention-days: 90
+          overwrite: true
+  planetary:
+    needs: [prepare, transitions]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        id: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - name: Install render runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libglfw3 libgl1-mesa-dri xvfb xauth ffmpeg python3-numpy
+      - uses: actions/download-artifact@v4
+        with: {name: v122-toolchain, path: .}
+      - name: Restore completed checkpoints when retrying this run
+        if: github.run_attempt > 1
+        env: {GH_TOKEN: '${{ github.token }}'}
+        shell: bash
+        run: |
+          set -euo pipefail
+          name='v122-native-part-${{ matrix.id }}'
+          count=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" --jq ".artifacts | map(select(.name==\"$name\")) | length")
+          if [ "$count" -gt 0 ]; then gh run download "$GITHUB_RUN_ID" --name "$name" --dir 'output/native_part_${{ matrix.id }}'; fi
+      - name: Render ten seconds of the planetary arc with validated checkpoints
+        run: |
+          chmod +x build/bigbang
+          python3 scripts/v122_previews.py part --id '${{ matrix.id }}'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v122-native-part-${{ matrix.id }}
+          path: output/native_part_${{ matrix.id }}/
+          if-no-files-found: warn
+          retention-days: 90
+          overwrite: true
+  package:
+    needs: [prepare, transitions, planetary]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - run: sudo apt-get update && sudo apt-get install --no-install-recommends -y ffmpeg python3-numpy
+      - uses: actions/download-artifact@v4
+        with: {name: v122-toolchain, path: .}
+      - uses: actions/download-artifact@v4
+        with: {pattern: 'v122-native-part-*', path: incoming/parts}
+      - uses: actions/download-artifact@v4
+        with: {pattern: 'V12_2_*', path: incoming/transitions, merge-multiple: true}
+      - name: Audit all 5400 native frames and assemble the 180-second stereo preview ZIP
+        run: |
+          chmod +x build/bigbang
+          python3 scripts/v122_previews.py assemble --incoming incoming/parts
+          mkdir -p release
+          cp output/v122/V12_2_Planetary_180s.zip release/
+          cp incoming/transitions/*.zip release/
+          python3 - <<'PY'
+          import pathlib, shutil
+          for folder in list(pathlib.Path('incoming/transitions').iterdir())+[pathlib.Path('output/v122/V12_2_Planetary_180s')]:
+              if folder.is_dir():
+                  for name in ['Motion.gif','Contact.png','Final_Frame.png']:
+                      p=folder/name
+                      if p.exists():shutil.copy(p,pathlib.Path('release')/(folder.name+'_'+name))
+          PY
+          cd release
+          sha256sum *.zip > ARCHIVE_SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with: {name: V12_2_Verified_Planetary_Preview_ZIPs, path: release/, retention-days: 90, overwrite: true}
+  publish:
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions: {contents: write, actions: read}
+    env: {GH_TOKEN: '${{ github.token }}'}
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - run: sudo apt-get update && sudo apt-get install --no-install-recommends -y ffmpeg python3-numpy
+      - uses: actions/download-artifact@v4
+        with: {name: V12_2_Verified_Planetary_Preview_ZIPs, path: release}
+      - name: Publish an isolated preview prerelease and verify its downloaded ZIPs
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="v12-2-planet-portraits-$GITHUB_RUN_ID"
+          export TAG
+          python3 - <<'PY'
+          import os,pathlib
+          tag=os.environ['TAG'];repo=os.environ['GITHUB_REPOSITORY']
+          text='# V12.2 planetary formation — moving preview for visual review\n\n'
+          text+='Nine 12-second native clips (seven distinct planet close-ups, full-system reveal, and Earth) plus a continuous 180-second 02:00–05:00 planetary preview. '
+          text+='Each ZIP contains 960×540 H.264 at 30 fps, a 640×360 easy-play edition, original stereo AAC, validation evidence, checksums and Ubuntu VLC instructions.\n\n'
+          text+='Procedural, art-directed accretion illustration; no N-body or collision simulation is claimed. '
+          text+='The verified native 4K screening release and V11/V12 sources are preserved. Full 1080p and revised 4K rendering await visual approval.\n\n'
+          text+='Renderer/source commit: '+os.environ['GITHUB_SHA']+'\n\n'
+          for p in sorted(pathlib.Path('release').glob('*.gif')):
+              text+='!['+p.stem+'](https://github.com/'+repo+'/releases/download/'+tag+'/'+p.name+')\n\n'
+          text+='Animated review thumbnails use 8 fps; packaged MP4s retain all 30 fps native frames.\n\n'
+          text+='![Final native preview frame](https://github.com/'+repo+'/releases/download/'+tag+'/V12_2_Planetary_180s_Final_Frame.png)\n\n'
+          pathlib.Path('Preview_Notes.md').write_text(text)
+          PY
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --target "$GITHUB_SHA" --prerelease --title 'V12.2 each-planet close-up native preview — visual approval pending' --notes-file Preview_Notes.md
+          fi
+          mkdir -p existing
+          for asset in release/*; do
+            name=$(basename "$asset")
+            if gh release download "$TAG" --pattern "$name" --dir existing >/dev/null 2>&1; then
+              cmp "$asset" "existing/$name"
+            else
+              gh release upload "$TAG" "$asset"
+            fi
+          done
+          mkdir downloaded
+          gh release download "$TAG" --pattern '*.zip' --dir downloaded
+          (cd downloaded && sha256sum -c ../release/ARCHIVE_SHA256SUMS.txt)
+          python3 scripts/v122_previews.py verify --incoming downloaded
+          if gh release download "$TAG" --pattern Release_Download_Verification.json --dir existing >/dev/null 2>&1; then
+            cmp downloaded/Release_Download_Verification.json existing/Release_Download_Verification.json
+          else
+            gh release upload "$TAG" downloaded/Release_Download_Verification.json
+          fi
+          printf '\nAll ten released ZIPs were downloaded, SHA-256 and ZIP CRC/internal hashes checked, and all twenty downloaded MP4s fully decoded. See Release_Download_Verification.json. Visual approval remains pending.\n' >> Preview_Notes.md
+          gh release edit "$TAG" --notes-file Preview_Notes.md
+          echo "https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
